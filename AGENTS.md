@@ -2,6 +2,13 @@
 
 Guidance for agent tooling operating in this repository.
 
+## Communication language
+
+Prose and explanations are written in Bahasa Indonesia. Code, identifiers, and
+technical terms (MQTT, Supabase, RLS, command, batch, session, ...) stay in
+English. This applies to explanations, work summaries, commit messages, and
+issue-tracker updates.
+
 ## Agent skills
 
 ### Issue tracker
