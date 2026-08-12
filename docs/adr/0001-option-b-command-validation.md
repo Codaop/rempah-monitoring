@@ -1,0 +1,3 @@
+# Option B: optimistic-concurrency command validation
+
+Commands are validated against the device's current state in the database: every command carries the state the operator expects, and the bridge rejects the command when the stored state differs, prompting the operator to refresh rather than acting on stale information. No lock or session mechanism is used, because there is a single device, a small team, low command frequency, and the farmer user profile is incompatible with an acquire/release mechanism. Emergency stop is excluded from validation and always bypasses to the device.
