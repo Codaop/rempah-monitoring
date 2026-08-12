@@ -1,0 +1,5 @@
+#!/bin/sh
+export PATH="$PWD/dashboard/node_modules/.bin:$PATH"
+npx lint-staged
+npm --prefix dashboard run build
+py -m pytest bridge/tests -q
