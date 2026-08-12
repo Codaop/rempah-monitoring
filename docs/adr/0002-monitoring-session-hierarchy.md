@@ -1,0 +1,3 @@
+# Monitoring Session ownership hierarchy (Shape B)
+
+Data is organised as Producer → Device → Monitoring Session → Batch → sensor_logs / BatchLog, with `producer_id` on every table. A monitoring session covers the devices an operator selected before the session opened, so scaling later to multiple machines and parallel sessions requires no schema change. Batch boundaries derive from device-state transitions, not from manual bookkeeping, so recording a run is automatic.

@@ -1,0 +1,3 @@
+# HiveMQ Cloud Serverless FREE as the MQTT broker
+
+HiveMQ Cloud Serverless (FREE) was chosen over EMQX Cloud Serverless. It is permanently free, offers 100 concurrent sessions and 10 GB of data traffic per month (EMQX: 1 GB), and does not stop the deployment after idle periods — EMQX's free tier auto-stops after 30 days without client connections. Username/password over TLS is sufficient for per-device credentials and bridge authentication on this tier; client certificates (mTLS) are not available and not required.
