@@ -1,6 +1,6 @@
 # 06 — Web dashboard
 
-Status: in-progress
+Status: done
 
 ## Problem
 
