@@ -1,0 +1,2 @@
+# rempah-monitoring
+Project ini merupakan sistem pemantauan berbasis IoT dan platform web yang dirancang khusus untuk memantau proses distilasi minyak atsiri kapulaga secara real-time. Dengan mengontrol dan memantau parameter penting seperti suhu dan tekanan selama penyulingan, sistem ini membantu produsen meningkatkan keefisienan waktu, menghemat konsumsi energi, serta menjaga konsistensi kualitas minyak atsiri yang dihasilkan.
