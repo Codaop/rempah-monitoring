@@ -1,12 +1,21 @@
 <script setup>
-import { computed } from 'vue'
-import { fmtTime } from '../lib/format'
+import { computed } from "vue";
+import { fmtTime } from "../lib/format";
 
 const props = defineProps({
   alerts: { type: Array, default: () => [] },
-})
+});
 
-const sorted = computed(() => [...props.alerts].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 30))
+const sorted = computed(() =>
+  [...props.alerts].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 30)
+);
+
+function dotColor(level) {
+  if (level === "danger") return "#e53e3e";
+  if (level === "warn") return "#d69e2e";
+  if (level === "ok" || level === "success") return "#2f9e63";
+  return "#3a7ca5";
+}
 </script>
 
 <template>
@@ -14,10 +23,12 @@ const sorted = computed(() => [...props.alerts].sort((a, b) => new Date(b.at) - 
     <h2>Log Notifikasi</h2>
     <div class="log" v-if="sorted.length">
       <div v-for="(a, i) in sorted" :key="i" class="entry">
-        <span class="badge" :class="`badge-${a.level}`">{{ a.tag }}</span>
+        <span class="dot" :style="{ background: dotColor(a.level) }"></span>
         <div class="entry-body">
           <div class="entry-msg">{{ a.message }}</div>
-          <div class="muted">{{ fmtTime(a.at) }}</div>
+          <div class="entry-meta">
+            {{ fmtTime(a.at) }}<template v-if="a.tag"> · {{ a.tag }}</template>
+          </div>
         </div>
       </div>
     </div>
@@ -26,9 +37,44 @@ const sorted = computed(() => [...props.alerts].sort((a, b) => new Date(b.at) - 
 </template>
 
 <style scoped>
-.log { display: flex; flex-direction: column; }
-.entry { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
-.entry:last-child { border-bottom: 0; }
-.entry-body { flex: 1; min-width: 0; }
-.entry-msg { font-size: 13.5px; }
+.log {
+  display: flex;
+  flex-direction: column;
+}
+
+.entry {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: flex-start;
+}
+.entry:last-child {
+  border-bottom: 0;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 9px;
+  margin-top: 4px;
+}
+
+.entry-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.entry-msg {
+  font-size: 13.5px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.entry-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
 </style>

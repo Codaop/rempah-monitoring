@@ -1,37 +1,57 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import { supabase } from '../lib/supabase'
+import { useRouter } from "vue-router";
 
-const router = useRouter()
-const user = ref(null)
+const router = useRouter();
+
 const nav = [
-  { name: 'dashboard', label: 'Dashboard', icon: '◈' },
-  { name: 'analytics', label: 'Analitik & Log', icon: '▤' },
-  { name: 'profile', label: 'Profil', icon: '●' },
-]
-
-onMounted(async () => {
-  const { data } = await supabase.auth.getUser()
-  user.value = data.user
-})
-
-async function logout() {
-  await supabase.auth.signOut()
-  router.push({ name: 'login' })
-}
+  { name: "dashboard", label: "Dasbor" },
+  { name: "analytics", label: "Analitik & Log" },
+  { name: "profile", label: "Profil" },
+];
 </script>
 
 <template>
   <div class="shell">
     <aside class="side">
       <div class="brand">
-        <div class="logo">R</div>
+        <div class="logo-box">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            width="22"
+            height="22"
+          >
+            <path
+              d="M12 21C12 21 5 15 5 9a7 7 0 0 1 14 0c0 6-7 12-7 12z"
+              stroke="white"
+              stroke-width="1.4"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M12 7v12"
+              stroke="white"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            />
+            <path
+              d="M9 10c0-1.5 1.2-3 3-3s3 1.5 3 3"
+              stroke="white"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              fill="none"
+            />
+            <circle cx="12" cy="15" r="1.4" fill="white" opacity="0.85" />
+            <circle cx="10" cy="12" r="0.9" fill="white" opacity="0.65" />
+            <circle cx="14" cy="12" r="0.9" fill="white" opacity="0.65" />
+          </svg>
+        </div>
         <div>
           <div class="brand-name">REM-PAH</div>
-          <div class="brand-sub">Monitoring Kapulaga</div>
+          <div class="brand-sub">Kontrol Distilasi</div>
         </div>
       </div>
+
       <nav class="nav">
         <router-link
           v-for="item in nav"
@@ -40,18 +60,79 @@ async function logout() {
           class="nav-item"
           active-class="active"
         >
-          <span class="nav-icon">{{ item.icon }}</span>{{ item.label }}
+          <!-- Dashboard icon -->
+          <svg
+            v-if="item.name === 'dashboard'"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect width="7" height="7" x="3" y="3" rx="1" />
+            <rect width="7" height="7" x="14" y="3" rx="1" />
+            <rect width="7" height="7" x="3" y="14" rx="1" />
+            <rect width="7" height="7" x="14" y="14" rx="1" />
+          </svg>
+          <!-- Analytics icon -->
+          <svg
+            v-if="item.name === 'analytics'"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          <!-- Profile icon -->
+          <svg
+            v-if="item.name === 'profile'"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M20 21a8 8 0 0 0-16 0" />
+          </svg>
+          <span>{{ item.label }}</span>
         </router-link>
       </nav>
+
       <div class="side-foot">
-        <div class="user-chip">
-          <div class="avatar">{{ (user?.email || '?')[0].toUpperCase() }}</div>
-          <div class="user-meta">
-            <div class="user-mail">{{ user?.email }}</div>
-            <div class="muted">Operator</div>
-          </div>
-        </div>
-        <button class="btn btn-ghost btn-sm full" @click="logout">Keluar</button>
+        <button
+          class="batch-btn"
+          @click="
+            router.push({ name: 'dashboard', query: { start: Date.now() } })
+          "
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="16" />
+            <line x1="8" y1="12" x2="16" y2="12" />
+          </svg>
+          Mulai Batch Baru
+        </button>
       </div>
     </aside>
 
@@ -62,64 +143,156 @@ async function logout() {
 </template>
 
 <style scoped>
-.shell { display: flex; min-height: 100vh; }
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
 
 .side {
-  width: 240px;
-  flex: 0 0 240px;
-  background: var(--navy);
-  color: #cbd5e1;
+  width: 220px;
+  flex: 0 0 220px;
+  background: #ffffff;
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 18px 14px;
+  padding: 20px 16px;
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
 }
 
-.brand { display: flex; gap: 10px; align-items: center; padding: 4px 6px 18px; }
-.logo {
-  width: 38px; height: 38px; border-radius: 10px;
-  background: var(--teal); color: #fff;
-  display: grid; place-items: center;
-  font-weight: 800; font-size: 19px;
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 4px 24px;
 }
-.brand-name { font-weight: 700; color: #fff; font-size: 16px; }
-.brand-sub { font-size: 11.5px; color: #94a3b8; }
 
-.nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.logo-box {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--navy);
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+}
+
+.brand-name {
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
 .nav-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 9px;
-  color: #cbd5e1; font-weight: 500; font-size: 14px;
-  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--navy);
+  font-weight: 500;
+  font-size: 13.5px;
+  transition:
+    background 0.12s,
+    color 0.12s;
+  text-decoration: none;
 }
-.nav-item:hover { background: rgba(255, 255, 255, 0.06); text-decoration: none; color: #fff; }
-.nav-item.active { background: var(--teal); color: #fff; }
-.nav-icon { width: 18px; text-align: center; opacity: 0.9; }
 
-.side-foot { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-.user-chip { display: flex; gap: 10px; align-items: center; }
-.avatar {
-  width: 34px; height: 34px; border-radius: 50%;
-  background: var(--teal); color: #fff;
-  display: grid; place-items: center; font-weight: 700;
+.nav-item:hover {
+  background: var(--teal-soft);
+  color: var(--teal);
+  text-decoration: none;
 }
-.user-mail { font-size: 13px; color: #fff; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
-.full { width: 100%; }
 
-.main { flex: 1; padding: 24px; max-width: 1180px; min-width: 0; }
+.nav-item.active {
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.side-foot {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+
+.batch-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--navy);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.batch-btn:hover {
+  filter: brightness(1.15);
+}
+
+.main {
+  flex: 1;
+  padding: 24px 28px;
+  min-width: 0;
+  max-width: 1200px;
+}
 
 @media (max-width: 760px) {
-  .shell { flex-direction: column; }
-  .side {
-    width: 100%; flex: none; height: auto; position: static;
-    flex-direction: row; align-items: center; padding: 10px 14px;
+  .shell {
+    flex-direction: column;
   }
-  .brand { padding: 0 12px 0 0; }
-  .brand-sub, .side-foot { display: none; }
-  .nav { flex-direction: row; overflow-x: auto; }
-  .nav-item { white-space: nowrap; padding: 8px 10px; }
-  .main { padding: 14px; }
+  .side {
+    width: 100%;
+    flex: none;
+    height: auto;
+    position: static;
+    padding: 12px 16px;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    padding: 0 16px 0 0;
+  }
+  .brand-sub {
+    display: none;
+  }
+  .nav {
+    flex-direction: row;
+    overflow-x: auto;
+    flex: 1;
+  }
+  .nav-item span {
+    display: none;
+  }
+  .side-foot {
+    display: none;
+  }
+  .main {
+    padding: 16px;
+  }
 }
 </style>

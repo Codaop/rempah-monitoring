@@ -16,36 +16,43 @@
   --radius-sm: 9px;
   --shadow: 0 1px 3px rgba(28, 43, 58, 0.08), 0 4px 14px rgba(28, 43, 58, 0.06);
   --space: 16px;
-  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    Roboto,
+    sans-serif;
 }
-
-* { box-sizing: border-box; }
-
-html, body {
+* {
+  box-sizing: border-box;
+}
+html,
+body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-size: 15px;
 }
-
-#app { min-height: 100vh; }
-
-h1, h2, h3 { margin: 0; }
-
+#app {
+  min-height: 100vh;
+}
+h1,
+h2,
+h3 {
+  margin: 0;
+}
 .card {
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: var(--space);
 }
-
 .card h2 {
   font-size: 15px;
   font-weight: 600;
   color: var(--navy);
   margin-bottom: 12px;
 }
-
 .btn {
   border: 0;
   border-radius: var(--radius-sm);
@@ -53,26 +60,42 @@ h1, h2, h3 { margin: 0; }
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.15s, transform 0.05s;
+  transition:
+    filter 0.15s,
+    transform 0.05s;
 }
-.btn:active { transform: scale(0.98); }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.btn-primary { background: var(--teal); color: #fff; }
-.btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
-
-.btn-danger { background: var(--danger); color: #fff; }
-
+.btn:active {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--teal);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
 .btn-ghost {
   background: transparent;
   color: var(--teal);
   border: 1px solid var(--teal);
 }
-.btn-ghost:hover:not(:disabled) { background: var(--teal-soft); }
-
-.btn-sm { padding: 6px 10px; font-size: 12.5px; }
-
-.input, select.input {
+.btn-ghost:hover:not(:disabled) {
+  background: var(--teal-soft);
+}
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+.input,
+select.input {
   width: 100%;
   padding: 11px 13px;
   border: 1px solid var(--line);
@@ -81,8 +104,10 @@ h1, h2, h3 { margin: 0; }
   background: #fff;
   color: var(--text);
 }
-.input:focus { outline: 2px solid var(--teal); border-color: transparent; }
-
+.input:focus {
+  outline: 2px solid var(--teal);
+  border-color: transparent;
+}
 .badge {
   display: inline-block;
   padding: 3px 9px;
@@ -90,17 +115,77 @@ h1, h2, h3 { margin: 0; }
   font-size: 12px;
   font-weight: 600;
 }
-.badge-ok { background: #e3f5ec; color: var(--ok); }
-.badge-warn { background: #fdf0dc; color: var(--warn); }
-.badge-danger { background: var(--danger-soft); color: var(--danger); }
-.badge-info { background: var(--teal-soft); color: var(--teal); }
+.badge-ok {
+  background: #e3f5ec;
+  color: var(--ok);
+}
+.badge-warn {
+  background: #fdf0dc;
+  color: var(--warn);
+}
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.badge-info {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+th,
+td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+tr:hover td {
+  background: #f6f8fa;
+}
 
-a { color: var(--teal); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-.muted { color: var(--muted); font-size: 13px; }
-
-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
-tr:hover td { background: #f6f8fa; }
+/* ── Tambahan untuk desain baru ── */
+.btn-navy {
+  background: var(--navy);
+  color: #fff;
+  border-radius: 999px;
+}
+.btn-navy:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.btn-pill {
+  border-radius: 999px !important;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  background: white;
+}
