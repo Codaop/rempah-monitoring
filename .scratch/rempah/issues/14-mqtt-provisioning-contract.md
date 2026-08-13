@@ -6,7 +6,11 @@ Contract (from the spec): topics `rempah/{device_id}/telemetry|state|command`; t
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Provisioning checklist document exists.
-- [ ] Canonical payload examples match the spec exactly.
+- [x] Provisioning checklist document exists.
+- [x] Canonical payload examples match the spec exactly.
+
+## Comments
+
+- 2026-08-12: Document created at `docs/mqtt-provisioning.md` — HiveMQ credential flow (per-device + Bridge credential, TLS 8883, Let's Encrypt + TLS-SNI), canonical telemetry/state/command payloads verbatim from spec, topic summary, action list.

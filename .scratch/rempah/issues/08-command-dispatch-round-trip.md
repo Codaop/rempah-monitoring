@@ -4,9 +4,13 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Valid command is forwarded on the device command topic with `command_id`.
-- [ ] State mismatch → `commands.status = rejected`, nothing forwarded.
-- [ ] Emergency stop is always forwarded regardless of state.
-- [ ] Dashboard refresh prompt appears on rejection.
+- [x] Valid command is forwarded on the device command topic with `command_id`.
+- [x] State mismatch → `commands.status = rejected`, nothing forwarded.
+- [x] Emergency stop is always forwarded regardless of state.
+- [x] Dashboard refresh prompt appears on rejection.
+
+## Comments
+
+- 2026-08-12: Implemented. `__main__.py` polls `pending_commands()` (status=pending, 2s interval) and feeds `Bridge.process_command`; valid commands forwarded to `rempah/{device_id}/command` and marked `dispatched`; mismatches rejected without forward; `EMERGENCY_STOP` (dashboard action name) and `ESTOP` (firmware contract) both bypass validation. Tests: forwarded-command marked dispatched; dashboard emergency-stop name always forwarded.

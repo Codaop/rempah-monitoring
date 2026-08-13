@@ -4,8 +4,12 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `estimated_yield` / `estimated_finish_at` update as telemetry arrives, verified against independent worked examples (not recomputation).
-- [ ] Over-temperature alert fires at/above the threshold and clears below it.
-- [ ] Device-detected binary alerts pass through with no Bridge computation.
+- [x] `estimated_yield` / `estimated_finish_at` update as telemetry arrives, verified against independent worked examples (not recomputation).
+- [x] Over-temperature alert fires at/above the threshold and clears below it.
+- [x] Device-detected binary alerts pass through with no Bridge computation.
+
+## Comments
+
+- 2026-08-12: Implemented. `update_estimate` upserts `batch_logs` by `batch_id` with `estimated_yield` (drip accumulation × DRIP_ML) and `estimated_finish_at` (drip-yield rate vs `target_yield_l`). Over-temperature alert persisted to new `alerts` table (migration 02). Device-detected alerts ride the state message (cause=detected) with no computation, per spec.

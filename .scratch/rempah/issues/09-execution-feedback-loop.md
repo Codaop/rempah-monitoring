@@ -6,9 +6,13 @@ Contract (from the spec, the firmware must implement this): retained state on `r
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `command_executed` → `device_state.mode` updated and `commands.status = succeeded`.
-- [ ] `command_failed` → `commands.status = failed`; dashboard shows a clear failure marker.
-- [ ] `detected` transitions update state with no associated command.
-- [ ] Dashboard mode card and notification log reflect executed actions without manual refresh.
+- [x] `command_executed` → `device_state.mode` updated and `commands.status = succeeded`.
+- [x] `command_failed` → `commands.status = failed`; dashboard shows a clear failure marker.
+- [x] `detected` transitions update state with no associated command.
+- [x] Dashboard mode card and notification log reflect executed actions without manual refresh.
+
+## Comments
+
+- 2026-08-12: Implemented. MQTT `rempah/{id}/state` handler → `SupabaseDbAdapter.set_device_state` (upsert `device_state`) + `mark_command` succeeded/failed from `cause`. Dashboard already subscribes to `device_state` UPDATE via Realtime, so the mode card updates without refresh.
