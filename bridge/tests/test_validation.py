@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import pytest
 
@@ -24,6 +24,8 @@ class FakeDb:
         self.state_updates: List[dict] = []
         self.alerts: List[dict] = []
         self.estimates: List[dict] = []
+        self.batch_opens: List[Tuple[str, str]] = []
+        self.batch_closes: List[Tuple[str, str]] = []
 
     def device_state(self, device_id: str) -> DeviceState:
         return self.state
@@ -44,7 +46,7 @@ class FakeDb:
     def set_last_seen(self, device_id: str, ts: float) -> None:
         self.last_seen[device_id] = ts
 
-    def get_last_seen(self, device_id: str) -> float:
+    def get_last_seen(self, device_id: str) -> Optional[float]:
         return self.last_seen.get(device_id)
 
     def list_devices(self) -> List[str]:
@@ -57,6 +59,18 @@ class FakeDb:
         self.estimates.append(
             {"device_id": device_id, "estimated_yield_l": estimated_yield_l, "ts": ts}
         )
+
+    def pending_commands(self) -> List[Command]:
+        return []
+
+    def open_pending_batch(self, device_id: str, ts: str) -> None:
+        self.batch_opens.append((device_id, ts))
+
+    def close_active_batch(self, device_id: str, ts: str) -> None:
+        self.batch_closes.append((device_id, ts))
+
+    def purge_old_sensor_logs(self) -> None:
+        pass
 
 
 @pytest.fixture
@@ -97,6 +111,29 @@ def test_emergency_stop_bypasses_validation_and_is_always_forwarded(mqtt: FakeMq
     assert mqtt.published == [
         ("rempah/d1/command", {"command_id": "c9", "action": "ESTOP"})
     ]
+
+
+def test_dashboard_emergency_stop_action_name_is_always_forwarded(mqtt: FakeMqtt) -> None:
+    """Dashboard sends EMERGENCY_STOP; the bridge must not treat it as a stale command."""
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    estop = Command(id="c10", device_id="d1", action="EMERGENCY_STOP")
+
+    bridge.process_command(estop)
+
+    assert mqtt.published == [
+        ("rempah/d1/command", {"command_id": "c10", "action": "EMERGENCY_STOP"})
+    ]
+
+
+def test_forwarded_command_is_marked_dispatched(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c1", device_id="d1", action="STOP", expected_state="DISTILLING")
+
+    bridge.process_command(command)
+
+    assert db.status_updates == [("c1", "dispatched")]
 
 
 def test_telemetry_message_is_persisted(mqtt: FakeMqtt) -> None:
@@ -243,3 +280,64 @@ def test_estimated_yield_accumulates_from_drips(mqtt: FakeMqtt) -> None:
     bridge.handle_telemetry("d1", {"ts": "10:00:10", "drip_count": 12, "boiler_temp_c": 95.0})
 
     assert db.estimates[-1]["estimated_yield_l"] == 0.00185
+
+
+def test_heating_transition_opens_pending_batch(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "d1",
+        "mode": "PREHEAT",
+        "cause": "detected",
+        "ts": "2026-08-11T10:05:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.batch_opens == [("d1", "2026-08-11T10:05:00Z")]
+
+
+def test_terminal_transition_closes_active_batch(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "d1",
+        "mode": "IDLE",
+        "cause": "detected",
+        "ts": "2026-08-11T11:00:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.batch_closes == [("d1", "2026-08-11T11:00:00Z")]
+
+
+def test_staying_in_heating_mode_does_not_reopen_batch(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "d1",
+        "mode": "DISTILLING",
+        "cause": "detected",
+        "ts": "2026-08-11T10:06:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.batch_opens == []
+
+
+def test_draining_is_neither_heating_nor_terminal(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "d1",
+        "mode": "DRAINING",
+        "cause": "detected",
+        "ts": "2026-08-11T11:00:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.batch_opens == []
+    assert db.batch_closes == []
