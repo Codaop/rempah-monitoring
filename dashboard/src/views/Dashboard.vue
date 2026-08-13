@@ -12,14 +12,13 @@ import AppShell from "../components/AppShell.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PowerPanel from "../components/PowerPanel.vue";
 import BatchPanel from "../components/BatchPanel.vue";
-import BatchStarter from "../components/BatchStarter.vue";
 import NotificationLog from "../components/NotificationLog.vue";
 import { supabase } from "../lib/supabase";
 import { fmtNum, fmtTime, fmtDateTime } from "../lib/format";
 
 const REFRESH_MS = 30000;
 const route = useRoute();
-const starter = ref(null);
+const batchPanel = ref(null);
 
 const devices = ref([]);
 const batch = ref(null);
@@ -234,12 +233,16 @@ function onBatchLog({ level, tag, message }) {
   pushAlert(level || "info", tag || "BATCH", message);
 }
 
+async function onBatchCreated() {
+  await loadAll();
+}
+
 watch(
   () => route.query.start,
   async (v) => {
     if (!v) return;
     await nextTick();
-    starter.value?.openStart();
+    batchPanel.value?.openModal();
   },
   { immediate: true }
 );
@@ -395,17 +398,21 @@ async function refreshState() {
 
       <!-- Power + Batch panels -->
       <div class="grid-mid">
-        <PowerPanel :devices="devices" @command="onCommand" />
-        <BatchPanel :batch="batch" :log="batchLog" />
+        <PowerPanel
+          :devices="devices"
+          :batch-active="!!batch"
+          @command="onCommand"
+        />
+        <BatchPanel
+          ref="batchPanel"
+          :batch="batch"
+          :log="batchLog"
+          :devices="devices"
+          @command="onCommand"
+          @log="onBatchLog"
+          @created="onBatchCreated"
+        />
       </div>
-
-      <!-- Start batch (session + pending batch) -->
-      <BatchStarter
-        ref="starter"
-        :devices="devices"
-        @command="onCommand"
-        @log="onBatchLog"
-      />
 
       <!-- Notification log -->
       <NotificationLog :alerts="alerts" />

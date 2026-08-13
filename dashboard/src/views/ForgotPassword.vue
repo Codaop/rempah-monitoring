@@ -321,4 +321,13 @@ async function submit() {
   color: var(--teal);
   font-weight: 500;
 }
+
+@media (max-width: 400px) {
+  .auth-wrap {
+    padding: 10px;
+  }
+  .auth-card {
+    padding: 20px;
+  }
+}
 </style>

@@ -955,12 +955,14 @@ onBeforeUnmount(() => clearInterval(timer));
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
-.search-wrap,
-.filter-wrap {
+.search-wrap {
   position: relative;
   display: flex;
   align-items: center;
+  flex: 1 1 180px;
+  min-width: 0;
 }
 .search-icon {
   position: absolute;
@@ -970,7 +972,7 @@ onBeforeUnmount(() => clearInterval(timer));
 }
 .search-input {
   padding-left: 32px;
-  width: 200px;
+  width: 100%;
 }
 .filter-wrap svg {
   position: absolute;
@@ -978,9 +980,21 @@ onBeforeUnmount(() => clearInterval(timer));
   color: var(--muted);
   pointer-events: none;
 }
+.filter-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
 .filter-select {
   padding-left: 30px;
   width: 130px;
+}
+
+@media (max-width: 600px) {
+  .search-wrap {
+    flex-basis: 100%;
+  }
 }
 
 .table-wrap {

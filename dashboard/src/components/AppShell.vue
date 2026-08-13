@@ -1,5 +1,8 @@
 <script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
+import { supabase } from "../lib/supabase";
+import { offlineSince } from "../lib/format";
 
 const router = useRouter();
 
@@ -8,6 +11,44 @@ const nav = [
   { name: "analytics", label: "Analitik & Log" },
   { name: "profile", label: "Profil" },
 ];
+
+// ── Status batch aktif + perangkat tersedia (untuk tombol sidebar) ─────────
+const hasActiveBatch = ref(false);
+const devices = ref([]);
+const POLL_MS = 30000;
+let timer = null;
+
+const anyDeviceAvailable = computed(() =>
+  devices.value.some((d) => {
+    if (!d.mode || d.mode !== "IDLE") return false;
+    const ms = offlineSince(d.last_seen_at);
+    return ms >= 0 && ms < 45000;
+  })
+);
+
+async function refreshBatchStatus() {
+  const [batchRes, devRes, stateRes] = await Promise.all([
+    supabase.from("batches").select("id").eq("status", "active").limit(1),
+    supabase.from("devices").select("id, name, last_seen_at"),
+    supabase.from("device_state").select("device_id, mode"),
+  ]);
+  hasActiveBatch.value = Boolean(batchRes.data?.[0]);
+  const states = stateRes.data || [];
+  devices.value = (devRes.data || []).map((d) => ({
+    ...d,
+    mode: (states.find((s) => s.device_id === d.id) || {}).mode || "IDLE",
+  }));
+}
+
+function startNewBatch() {
+  router.push({ name: "dashboard", query: { start: Date.now() } });
+}
+
+onMounted(async () => {
+  await refreshBatchStatus();
+  timer = setInterval(refreshBatchStatus, POLL_MS);
+});
+onBeforeUnmount(() => clearInterval(timer));
 </script>
 
 <template>
@@ -110,12 +151,11 @@ const nav = [
         </router-link>
       </nav>
 
-      <div class="side-foot">
+      <div class="side-foot" v-if="hasActiveBatch">
         <button
           class="batch-btn"
-          @click="
-            router.push({ name: 'dashboard', query: { start: Date.now() } })
-          "
+          :disabled="!anyDeviceAvailable"
+          @click="startNewBatch"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -251,6 +291,11 @@ const nav = [
 .batch-btn:hover {
   filter: brightness(1.15);
 }
+.batch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+}
 
 .main {
   flex: 1;
@@ -268,22 +313,38 @@ const nav = [
     flex: none;
     height: auto;
     position: static;
-    padding: 12px 16px;
+    padding: 10px 12px;
     flex-direction: row;
     align-items: center;
     border-right: none;
     border-bottom: 1px solid var(--line);
+    gap: 8px;
   }
   .brand {
-    padding: 0 16px 0 0;
+    padding: 0 8px 0 0;
+    flex: 0 0 auto;
   }
   .brand-sub {
     display: none;
+  }
+  .brand-name {
+    font-size: 14px;
+  }
+  .logo-box {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
   }
   .nav {
     flex-direction: row;
     overflow-x: auto;
     flex: 1;
+    justify-content: flex-end;
+  }
+  .nav-item {
+    padding: 10px;
+    min-width: 44px;
+    justify-content: center;
   }
   .nav-item span {
     display: none;
@@ -293,6 +354,24 @@ const nav = [
   }
   .main {
     padding: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .side {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .brand {
+    gap: 6px;
+  }
+  .logo-box {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+  }
+  .main {
+    padding: 12px;
   }
 }
 </style>

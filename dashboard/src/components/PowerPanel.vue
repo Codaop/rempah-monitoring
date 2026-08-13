@@ -1,10 +1,12 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { supabase } from "../lib/supabase";
 import { offlineSince } from "../lib/format";
+import AppModal from "./AppModal.vue";
 
 const props = defineProps({
   devices: { type: Array, default: () => [] },
+  batchActive: { type: Boolean, default: false },
 });
 const emit = defineEmits(["command"]);
 
@@ -12,33 +14,100 @@ const selectedIdx = ref(0);
 const showPicker = ref(false);
 const busy = ref(false);
 const note = ref("");
+const confirm = ref(null); // "power_off" | "estop" | null
+
+// ── Drag toggle ────────────────────────────────────────────────────────────
+const trackEl = ref(null);
+const trackW = ref(0);
+const dragging = ref(false);
+const dragPx = ref(0);
+const dragStartX = ref(0);
+const dragStartPx = ref(0);
+const moved = ref(false);
+
+const CIRCLE = 44; // diameter lingkaran toggle
+const PAD = 5; // padding track kiri/kanan
 
 const selectedDevice = computed(() => props.devices[selectedIdx.value] || null);
-const isOnline = computed(() => {
-  if (!selectedDevice.value) return false;
-  const ms = offlineSince(selectedDevice.value.last_seen_at);
-  return ms >= 0 && ms < 45000;
-});
 
 const isPoweredOn = computed(() => {
   const mode = selectedDevice.value?.mode;
   return mode && mode !== "IDLE" && mode !== "ESTOP";
 });
 
+const maxTravel = computed(() => Math.max(0, trackW.value - CIRCLE - PAD * 2));
+
+// Posisi lingkaran: kanan saat ON, kiri saat OFF; bebas selama drag.
+const circleOffset = computed(() => {
+  if (dragging.value) return dragPx.value;
+  return isPoweredOn.value ? maxTravel.value : 0;
+});
+
+const toggleLabel = computed(() =>
+  isPoweredOn.value ? "Tarik untuk mematikan" : "Tarik untuk nyalakan"
+);
+
+function measureTrack() {
+  if (trackEl.value) trackW.value = trackEl.value.getBoundingClientRect().width;
+}
+
+let ro = null;
+onMounted(() => {
+  measureTrack();
+  ro = new ResizeObserver(measureTrack);
+  if (trackEl.value) ro.observe(trackEl.value);
+});
+onBeforeUnmount(() => ro && ro.disconnect());
+
+function onDragStart(e) {
+  if (busy.value || !selectedDevice.value) return;
+  dragging.value = true;
+  moved.value = false;
+  dragStartX.value = e.clientX;
+  dragStartPx.value = circleOffset.value;
+  trackEl.value?.setPointerCapture?.(e.pointerId);
+}
+
+function onDragMove(e) {
+  if (!dragging.value) return;
+  const dx = e.clientX - dragStartX.value;
+  if (Math.abs(dx) > 5) moved.value = true;
+  const next = Math.min(maxTravel.value, Math.max(0, dragStartPx.value + dx));
+  dragPx.value = next;
+}
+
+function onDragEnd() {
+  if (!dragging.value) return;
+  dragging.value = false;
+  // Tap tanpa geser → fallback toggle klik.
+  if (!moved.value) {
+    togglePower();
+    return;
+  }
+  const wantOn = dragPx.value > maxTravel.value / 2;
+  dragPx.value = 0;
+  if (wantOn !== isPoweredOn.value) {
+    if (wantOn) {
+      sendCommand("POWER_ON", "IDLE");
+    } else {
+      requestPowerOff();
+    }
+  }
+}
+
+// ── Perintah daya ───────────────────────────────────────────────────────────
 async function sendCommand(action, expectedState) {
   if (!selectedDevice.value) return;
   busy.value = true;
   note.value = "";
   try {
     const d = selectedDevice.value;
-    const { error } = await supabase
-      .from("commands")
-      .insert({
-        producer_id: d.producer_id,
-        device_id: d.id,
-        action,
-        expected_state: expectedState || null,
-      });
+    const { error } = await supabase.from("commands").insert({
+      producer_id: d.producer_id,
+      device_id: d.id,
+      action,
+      expected_state: expectedState || null,
+    });
     if (error) throw error;
     const mismatch = expectedState && d.mode && d.mode !== expectedState;
     emit("command", {
@@ -58,12 +127,29 @@ async function sendCommand(action, expectedState) {
   }
 }
 
+// Matikan daya: butuh konfirmasi hanya bila batch sedang berjalan.
+function requestPowerOff() {
+  if (props.batchActive) confirm.value = "power_off";
+  else sendCommand("POWER_OFF", selectedDevice.value?.mode);
+}
+
 function togglePower() {
-  if (isPoweredOn.value) {
+  if (isPoweredOn.value) requestPowerOff();
+  else sendCommand("POWER_ON", "IDLE");
+}
+
+function askEstop() {
+  if (!selectedDevice.value || busy.value) return;
+  confirm.value = "estop";
+}
+
+function confirmAction() {
+  if (confirm.value === "power_off") {
     sendCommand("POWER_OFF", selectedDevice.value?.mode);
-  } else {
-    sendCommand("POWER_ON", "IDLE");
+  } else if (confirm.value === "estop") {
+    sendCommand("EMERGENCY_STOP", null);
   }
+  confirm.value = null;
 }
 
 function selectDevice(idx) {
@@ -77,11 +163,23 @@ function selectDevice(idx) {
     <h2>Tombol Daya &amp; Emergency</h2>
 
     <div
+      ref="trackEl"
       class="toggle-row"
-      @click="togglePower"
-      :class="{ on: isPoweredOn, disabled: busy || !selectedDevice }"
+      :class="{ on: isPoweredOn, disabled: busy || !selectedDevice, dragging }"
+      @pointerdown="onDragStart"
+      @pointermove="onDragMove"
+      @pointerup="onDragEnd"
+      @pointercancel="onDragEnd"
     >
-      <div class="toggle-circle">
+      <button
+        type="button"
+        class="toggle-circle"
+        :style="{ transform: `translateX(${circleOffset}px)` }"
+        :aria-pressed="isPoweredOn"
+        aria-label="Nyalakan atau matikan daya"
+        @keydown.enter.prevent="togglePower"
+        @keydown.space.prevent="togglePower"
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -94,10 +192,8 @@ function selectDevice(idx) {
           <polyline points="13 17 18 12 13 7" />
           <polyline points="6 17 11 12 6 7" />
         </svg>
-      </div>
-      <span class="toggle-label">{{
-        isPoweredOn ? "Tarik untuk mematikan" : "Tarik untuk nyalakan"
-      }}</span>
+      </button>
+      <span class="toggle-label">{{ toggleLabel }}</span>
     </div>
 
     <div class="device-picker" v-if="showPicker && devices.length > 0">
@@ -135,8 +231,8 @@ function selectDevice(idx) {
 
     <button
       class="btn-estop"
-      :disabled="busy"
-      @click="sendCommand('EMERGENCY_STOP', null)"
+      :disabled="busy || !selectedDevice"
+      @click="askEstop"
     >
       Emergency Stop
     </button>
@@ -149,6 +245,42 @@ function selectDevice(idx) {
       {{ note }}
     </div>
   </div>
+
+  <!-- Konfirmasi matikan daya saat batch berjalan -->
+  <AppModal
+    :open="confirm === 'power_off'"
+    title="Matikan Daya?"
+    @close="confirm = null"
+  >
+    <p class="confirm-text">
+      Batch sedang berjalan. Mematikan daya akan mengakhiri batch
+      {{ selectedDevice ? selectedDevice.name : "" }} dan menutupnya. Lanjutkan?
+    </p>
+    <template #actions>
+      <button class="btn btn-ghost" @click="confirm = null">Batal</button>
+      <button class="btn btn-danger" :disabled="busy" @click="confirmAction">
+        Ya, Matikan
+      </button>
+    </template>
+  </AppModal>
+
+  <!-- Konfirmasi emergency stop -->
+  <AppModal
+    :open="confirm === 'estop'"
+    title="Emergency Stop?"
+    @close="confirm = null"
+  >
+    <p class="confirm-text">
+      Semua proses akan dihentikan segera dan perangkat masuk mode ESTOP.
+      Tindakan ini butuh reset manual. Lanjutkan?
+    </p>
+    <template #actions>
+      <button class="btn btn-ghost" @click="confirm = null">Batal</button>
+      <button class="btn btn-danger" :disabled="busy" @click="confirmAction">
+        Ya, Stop
+      </button>
+    </template>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -157,16 +289,18 @@ h2 {
 }
 
 .toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 0;
+  position: relative;
+  height: 54px;
   background: #f1f5f9;
   border-radius: 999px;
-  padding: 5px;
+  padding: 0;
   cursor: pointer;
   transition: background 0.2s;
   margin-bottom: 12px;
   user-select: none;
+  touch-action: none;
+  display: flex;
+  align-items: center;
 }
 .toggle-row:hover:not(.disabled) {
   background: #e2e8f0;
@@ -177,17 +311,36 @@ h2 {
 }
 
 .toggle-circle {
+  position: absolute;
+  left: 5px;
+  top: 5px;
   width: 44px;
   height: 44px;
   border-radius: 50%;
+  border: none;
   background: var(--ok);
   display: grid;
   place-items: center;
-  flex: 0 0 44px;
-  transition: background 0.2s;
+  cursor: grab;
+  touch-action: none;
+  padding: 0;
+  transition:
+    transform 0.25s ease,
+    background 0.2s;
 }
 .toggle-row.on .toggle-circle {
   background: var(--warn);
+}
+.toggle-row.dragging .toggle-circle {
+  transition: none;
+  cursor: grabbing;
+}
+.toggle-row.disabled .toggle-circle {
+  cursor: not-allowed;
+}
+.toggle-circle:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
 }
 
 .toggle-label {
@@ -196,7 +349,15 @@ h2 {
   font-size: 13.5px;
   font-weight: 500;
   color: var(--navy);
-  padding-right: 12px;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+.confirm-text {
+  font-size: 13.5px;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.5;
 }
 
 .device-picker {
@@ -205,6 +366,8 @@ h2 {
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
   overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
 }
 .picker-item {
   display: flex;

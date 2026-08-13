@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import AppShell from "../components/AppShell.vue";
 import { supabase } from "../lib/supabase";
@@ -14,27 +14,112 @@ const saved = ref("");
 const error = ref("");
 const operatorId = ref("—");
 
-onMounted(async () => {
+// ── Auto refresh profil ────────────────────────────────────────────────────
+const POLL_MS = 30000;
+let pollTimer = null;
+let authSub = null;
+
+// ── Foto profil ────────────────────────────────────────────────────────────
+const avatarPath = ref("");
+const avatarUrl = ref("");
+const avatarBusy = ref(false);
+const avatarMsg = ref("");
+const fileInput = ref(null);
+
+async function loadAvatar() {
+  avatarUrl.value = "";
+  const p = profile.value?.user_metadata?.avatar_path;
+  if (!p) return;
+  avatarPath.value = p;
+  const { data, error: signErr } = await supabase.storage
+    .from("avatars")
+    .createSignedUrl(p, 3600);
+  if (!signErr && data?.signedUrl) avatarUrl.value = data.signedUrl;
+}
+
+// Muat ulang seluruh data profil (user, metadata, operator ID, avatar).
+async function loadProfile() {
   const { data: user } = await supabase.auth.getUser();
   profile.value = user.user || null;
+  if (!profile.value) return;
 
-  if (profile.value) {
-    emailVal.value = profile.value.email || "";
-    displayName.value =
-      profile.value.user_metadata?.display_name ||
-      profile.value.email?.split("@")[0] ||
-      "";
-    phone.value = profile.value.user_metadata?.phone || "";
+  emailVal.value = profile.value.email || "";
+  displayName.value =
+    profile.value.user_metadata?.display_name ||
+    profile.value.email?.split("@")[0] ||
+    "";
+  phone.value = profile.value.user_metadata?.phone || "";
 
-    const { data: op } = await supabase
-      .from("operators")
-      .select("id, producer_id")
-      .eq("id", profile.value.id)
-      .maybeSingle();
-    if (op) {
-      operatorId.value = "KPLG-" + op.id.slice(0, 5).toUpperCase();
-    }
+  const avatarP = profile.value.user_metadata?.avatar_path;
+  if (avatarP !== avatarPath.value) await loadAvatar();
+
+  const { data: op } = await supabase
+    .from("operators")
+    .select("id, producer_id")
+    .eq("id", profile.value.id)
+    .maybeSingle();
+  if (op) {
+    operatorId.value = "KPLG-" + op.id.slice(0, 5).toUpperCase();
   }
+}
+
+async function pickAvatar() {
+  fileInput.value?.click();
+}
+
+async function onFileChosen(e) {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file || !profile.value) return;
+  if (!file.type.startsWith("image/")) {
+    avatarMsg.value = "Pilih file gambar (JPG/PNG/WebP).";
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    avatarMsg.value = "Ukuran gambar maksimal 2 MB.";
+    return;
+  }
+
+  avatarBusy.value = true;
+  avatarMsg.value = "";
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const path = `${profile.value.id}.${ext}`;
+  try {
+    const { error: upErr } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (upErr) throw upErr;
+    const { error: metaErr } = await supabase.auth.updateUser({
+      data: { avatar_path: path },
+    });
+    if (metaErr) throw metaErr;
+    avatarPath.value = path;
+    await loadAvatar();
+    avatarMsg.value = "Foto profil diperbarui.";
+  } catch (err) {
+    avatarMsg.value = `Gagal mengunggah: ${err.message}`;
+  } finally {
+    avatarBusy.value = false;
+  }
+}
+
+onMounted(async () => {
+  await loadProfile();
+
+  // Reload otomatis saat data user berubah (simpan profil, upload avatar,
+  // update dari terminal lain) tanpa perlu refresh manual.
+  const { data: subData } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "USER_UPDATED" || event === "SIGNED_IN") loadProfile();
+  });
+  authSub = subData?.subscription || null;
+
+  // Polling berkala sebagai jaring pengaman (pola sama dengan dashboard).
+  pollTimer = setInterval(loadProfile, POLL_MS);
+});
+
+onBeforeUnmount(() => {
+  clearInterval(pollTimer);
+  authSub?.unsubscribe();
 });
 
 async function save() {
@@ -66,16 +151,32 @@ async function signOut() {
     <div class="card profile-card">
       <div class="avatar-col">
         <div class="avatar-circle">
-          <svg
-            viewBox="0 0 100 100"
-            xmlns="http://www.w3.org/2000/svg"
-            width="80"
-            height="80"
+          <div class="avatar-media">
+            <img
+              v-if="avatarUrl"
+              :src="avatarUrl"
+              alt="Foto profil"
+              class="avatar-img"
+            />
+            <svg
+              v-else
+              viewBox="0 0 100 100"
+              xmlns="http://www.w3.org/2000/svg"
+              width="80"
+              height="80"
+            >
+              <circle cx="50" cy="35" r="22" fill="#94a3b8" />
+              <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
+            </svg>
+          </div>
+          <button
+            type="button"
+            class="avatar-edit"
+            aria-label="Ubah foto profil"
+            title="Ubah foto profil"
+            :disabled="avatarBusy"
+            @click="pickAvatar"
           >
-            <circle cx="50" cy="35" r="22" fill="#94a3b8" />
-            <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
-          </svg>
-          <div class="avatar-edit">
             <svg
               width="11"
               height="11"
@@ -92,8 +193,16 @@ async function signOut() {
                 d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
               />
             </svg>
-          </div>
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            class="avatar-file"
+            @change="onFileChosen"
+          />
         </div>
+        <span v-if="avatarMsg" class="avatar-msg">{{ avatarMsg }}</span>
         <span class="role-badge">OPERATOR</span>
         <span class="op-id">ID: {{ operatorId }}</span>
       </div>
@@ -194,6 +303,16 @@ async function signOut() {
   }
 }
 
+@media (max-width: 380px) {
+  .profile-card {
+    gap: 20px;
+  }
+  .session-body {
+    justify-content: center;
+    text-align: center;
+  }
+}
+
 .avatar-col {
   display: flex;
   flex-direction: column;
@@ -207,23 +326,57 @@ async function signOut() {
   height: 100px;
   border-radius: 50%;
   background: #e2e8f0;
-  overflow: hidden;
   position: relative;
+}
+
+.avatar-media {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .avatar-edit {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
-  width: 24px;
-  height: 24px;
+  bottom: 0;
+  right: 0;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
+  border: 2px solid #fff;
   background: var(--teal);
   display: grid;
   place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: filter 0.15s;
+}
+.avatar-edit:hover {
+  filter: brightness(1.12);
+}
+.avatar-edit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.avatar-file {
+  display: none;
+}
+
+.avatar-msg {
+  font-size: 12px;
+  color: var(--ok);
+  text-align: center;
+  max-width: 160px;
 }
 
 .role-badge {
