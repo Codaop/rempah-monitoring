@@ -39,6 +39,43 @@ node --experimental-websocket scripts/realtime-smoke.mjs
 
 Node < 22 butuh flag `--experimental-websocket`; browser tidak (WebSocket native).
 
+## 2b. MQTT topic probe (sudah terhubung ke broker belum?)
+
+Memverifikasi koneksi MQTT dan trafik topic `rempah/#` pakai kredensial yang
+sama dengan `bridge/.env` (otomatis dimuat):
+
+```bash
+python bridge/scripts/mqtt_probe.py              # listen 15 detik lalu exit
+python bridge/scripts/mqtt_probe.py --watch       # listen terus (Ctrl+C)
+python bridge/scripts/mqtt_probe.py --seconds 30
+```
+
+- Output `✅ CONNECTED` = broker terjangkau dan kredensial diterima.
+- Pesan `rempah/<id>/state` (retained) langsung muncul saat subscribe = topic
+  pernah dipublish; pesan `telemetry` muncul bila `fake_esp32.py` berjalan.
+- Exit code 1 tanpa pesan = koneksi OK tapi tidak ada trafik; jalankan
+  `fake_esp32.py` lalu ulangi. Exit code 2 = gagal konek/refused.
+
+**Test topic sendiri (publish → diterima?)** — dua terminal:
+
+```bash
+# Terminal 1 — listen di topic kamu
+python bridge/scripts/mqtt_probe.py --topic 'topik-ku/+/data' --watch
+
+# Terminal 2 — publish satu pesan uji (PUBACK = broker menerima)
+python bridge/scripts/mqtt_pub.py --topic 'topik-ku/device1/data' --message '{"temp": 95.2}'
+# atau berulang tiap 5 detik:
+python bridge/scripts/mqtt_pub.py --topic 'topik-ku/device1/data' --message '{"temp": 95.2}' --loop 5
+```
+
+- Pesan muncul di Terminal 1 = data dari publish benar-benar sampai di topic.
+`--retain` membuat pesan tersimpan di broker dan langsung diterima subscriber
+baru. Catatan: probe/pub hanyalah alat uji pasif — bridge hanya menelan topic
+`{MQTT_TOPIC_ROOT}/+/telemetry` & `{MQTT_TOPIC_ROOT}/+/state` (kontrak ticket
+14); root ditentukan lewat env `MQTT_TOPIC_ROOT` di `bridge/.env` (default
+`rempah`) — kalau device asli pakai root lain, cukup ubah variabel itu, tidak
+perlu edit kode.
+
 ## 3. Dashboard
 
 ```bash
