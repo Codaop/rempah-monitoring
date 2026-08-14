@@ -52,7 +52,9 @@ class SupabaseDbAdapter:
             .maybe_single()
             .execute()
         )
-        mode = resp.data["mode"] if resp.data else "IDLE"
+        # maybe_single() mengembalikan None saat baris tidak ada (supabase-py
+        # 2.x) — guard eksplisit agar mode default IDLE tidak crash.
+        mode = resp.data["mode"] if resp and resp.data else "IDLE"
         return DeviceState(device_id=device_id, mode=mode)
 
     def set_device_state(self, device_id: str, mode: str, ts: str) -> None:
@@ -81,7 +83,7 @@ class SupabaseDbAdapter:
             .maybe_single()
             .execute()
         )
-        if not resp.data or not resp.data.get("last_seen_at"):
+        if not resp or not resp.data or not resp.data.get("last_seen_at"):
             return None
         return datetime.fromisoformat(resp.data["last_seen_at"]).timestamp()
 
@@ -109,7 +111,7 @@ class SupabaseDbAdapter:
                 .maybe_single()
                 .execute()
             )
-            if not resp.data or resp.data.get("first_seen_at"):
+            if not resp or not resp.data or resp.data.get("first_seen_at"):
                 return
             self._client.table("devices").update(
                 {"first_seen_at": dt}
@@ -225,7 +227,7 @@ class SupabaseDbAdapter:
             .maybe_single()
             .execute()
         )
-        if not resp.data:
+        if not resp or not resp.data:
             logger.debug("No pending batch for device %s; nothing to open", device_id)
             return
         charge_kg = float(resp.data.get("charge_mass_kg") or 0)
@@ -249,7 +251,7 @@ class SupabaseDbAdapter:
             .maybe_single()
             .execute()
         )
-        if not resp.data:
+        if not resp or not resp.data:
             logger.debug("No active batch for device %s; nothing to close", device_id)
             return
         batch_id = resp.data["id"]
@@ -334,7 +336,9 @@ class SupabaseDbAdapter:
             .maybe_single()
             .execute()
         )
-        return resp.data
+        # maybe_single() kosong → None (bukan APIResponse) — tanpa guard ini
+        # setiap telemetry saat tidak ada batch aktif akan crash.
+        return resp.data if resp else None
 
     def _resolve_producer(self, device_id: str) -> Optional[str]:
         if device_id not in self._producer_cache:
@@ -345,7 +349,7 @@ class SupabaseDbAdapter:
                 .maybe_single()
                 .execute()
             )
-            if resp.data:
+            if resp and resp.data:
                 self._producer_cache[device_id] = resp.data["producer_id"]
         return self._producer_cache.get(device_id)
 
