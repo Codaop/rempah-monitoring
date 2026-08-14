@@ -117,7 +117,7 @@ Dikirim setiap **5 detik**, QoS 1, **bukan retained**.
 {
   "ts": "2026-08-12T08:30:00Z",
   "boiler_temp_c": 94.5,
-  "gas_pressure_kpa": 3.1,
+  "gas_mass_kg": 28.6,
   "water_level": 65.2,
   "drip_count": 7,
   "flame_lit": true
@@ -128,7 +128,7 @@ Dikirim setiap **5 detik**, QoS 1, **bukan retained**.
 |---|---|---|
 | `ts` | ISO 8601 UTC | Timestamp dari device (RTC atau NTP) |
 | `boiler_temp_c` | number | Suhu boiler dalam °C |
-| `gas_pressure_kpa` | number | Tekanan gas LPG dalam kPa |
+| `gas_mass_kg` | number | Massa/berat gas LPG dari sensor beban (load cell) dalam kg |
 | `water_level` | number | Level air boiler (0–100 %) |
 | `drip_count` | integer | Jumlah drip yang terhitung dalam interval ini |
 | `flame_lit` | boolean | `true` jika nyala api terdeteksi |

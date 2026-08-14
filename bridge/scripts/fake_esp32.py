@@ -56,7 +56,9 @@ def telemetry_payload() -> dict:
     return {
         "ts": _ts(),
         "boiler_temp_c": round(94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7), 2),
-        "gas_pressure_kpa": round(3.1 + 0.3 * math.sin(t / 300), 2),
+        # Sensor beban (load cell): massa tabung LPG menurun seiring konsumsi.
+        # Asumsi tabung 15 kg + tare ~14 kg (total ~29 kg saat penuh).
+        "gas_mass_kg": round(28.6 - 0.01 * mins, 2),
         "water_level": round(max(40.0, 66.0 - 0.02 * mins), 2),
         "drip_count": max(1, int(6 + 4 * math.sin(t / 30))),
         "flame_lit": True,
@@ -135,7 +137,7 @@ def main() -> None:
         print(
             f"[{time.strftime('%H:%M:%S')}] telemetry "
             f"boiler={payload['boiler_temp_c']} C "
-            f"gas={payload['gas_pressure_kpa']}kPa "
+            f"gas={payload['gas_mass_kg']}kg "
             f"water={payload['water_level']}% "
             f"drip={payload['drip_count']}"
         )

@@ -161,7 +161,7 @@ def test_telemetry_message_is_persisted(mqtt: FakeMqtt) -> None:
     payload = {
         "ts": "2026-08-11T10:00:00Z",
         "boiler_temp_c": 102.4,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 3,
         "flame_lit": True,
@@ -225,7 +225,7 @@ def test_telemetry_above_threshold_raises_over_temperature_alert(mqtt: FakeMqtt)
     payload = {
         "ts": "2026-08-11T10:10:00Z",
         "boiler_temp_c": 102.4,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 3,
         "flame_lit": True,
@@ -244,7 +244,7 @@ def test_telemetry_below_threshold_raises_no_alert(mqtt: FakeMqtt) -> None:
     payload = {
         "ts": "2026-08-11T10:11:00Z",
         "boiler_temp_c": 98.0,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 3,
         "flame_lit": True,
@@ -261,7 +261,7 @@ def test_telemetry_refreshes_device_last_seen(mqtt: FakeMqtt) -> None:
     payload = {
         "ts": "2026-08-11T10:20:00Z",
         "boiler_temp_c": 90.0,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 3,
         "flame_lit": True,
@@ -368,7 +368,7 @@ def test_telemetry_records_first_contact(mqtt: FakeMqtt) -> None:
     payload = {
         "ts": "2026-08-11T10:00:00Z",
         "boiler_temp_c": 95.0,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 0,
         "flame_lit": True,
@@ -402,7 +402,7 @@ def test_telemetry_from_unknown_device_is_recorded_not_persisted(mqtt: FakeMqtt)
     payload = {
         "ts": "2026-08-11T10:00:00Z",
         "boiler_temp_c": 95.0,
-        "gas_pressure_kpa": 2.8,
+        "gas_mass_kg": 28.6,
         "water_level": "OK",
         "drip_count": 0,
         "flame_lit": True,

@@ -48,9 +48,7 @@ const latest = computed(
 const sparkTemp = computed(() =>
   deviceHistory.value.map((r) => r.boiler_temp_c)
 );
-const sparkGas = computed(() =>
-  deviceHistory.value.map((r) => r.gas_pressure_kpa)
-);
+const sparkGas = computed(() => deviceHistory.value.map((r) => r.gas_mass_kg));
 const sparkWater = computed(() =>
   deviceHistory.value.map((r) => r.water_level)
 );
@@ -456,9 +454,9 @@ async function refreshState() {
         </MetricCard>
 
         <MetricCard
-          label="TEKANAN GAS"
-          :value="fmtNum(latest.gas_pressure_kpa)"
-          unit="bar"
+          label="MASSA GAS"
+          :value="fmtNum(latest.gas_mass_kg)"
+          unit="kg"
           :data="sparkGas"
           color="#5a8a5a"
         >
@@ -471,18 +469,21 @@ async function refreshState() {
               stroke="currentColor"
               stroke-width="1.8"
               stroke-linecap="round"
+              stroke-linejoin="round"
             >
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
+              <path d="M12 3v12" />
+              <path d="M8 7h8" />
+              <path d="M9 21h6" />
+              <path d="M8 15h8" />
             </svg>
           </template>
         </MetricCard>
 
         <MetricCard
-          label="SUHU PENDINGIN AIR"
-          :value="fmtNum(latest.boiler_temp_c)"
-          unit="°C"
-          :data="sparkTemp"
+          label="LEVEL AIR"
+          :value="fmtNum(latest.water_level)"
+          unit="%"
+          :data="sparkWater"
           color="#3a7ca5"
         >
           <template #icon>
@@ -494,6 +495,7 @@ async function refreshState() {
               stroke="currentColor"
               stroke-width="1.8"
               stroke-linecap="round"
+              stroke-linejoin="round"
             >
               <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
             </svg>

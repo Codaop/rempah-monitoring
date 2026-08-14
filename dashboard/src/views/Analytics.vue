@@ -83,9 +83,11 @@ async function loadLog() {
       toRow({
         time: s.ts,
         category: "sensor",
-        event: `Tekanan Gas`,
-        value: `${fmtNum(s.gas_pressure_kpa)} kPa`,
-        status: Number(s.gas_pressure_kpa) > 4 ? "DANGER" : "OK",
+        event: `Massa Gas`,
+        value: `${fmtNum(s.gas_mass_kg)} kg`,
+        // Sensor beban: massa tabung menurun saat gas terpakai. Ambang default
+        // untuk tabung LPG 15 kg (tare ~14 kg) — sesuaikan dengan alat.
+        status: Number(s.gas_mass_kg) < 15 ? "DANGER" : "OK",
       })
     );
   }
