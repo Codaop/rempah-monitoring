@@ -90,7 +90,7 @@ def main() -> None:
             [sys.executable, "scripts/fake_esp32.py"],
             cwd=ROOT, stdout=open(FAKE_LOG, "w"), stderr=subprocess.STDOUT,
         ))
-        time.sleep(16)  # 3x interval telemetry 5s + margin
+        time.sleep(16)  # beberapa x interval telemetry 2s + margin
 
         count_before = len(table("/rest/v1/sensor_logs?select=id&limit=1000"))
         last_seen_before = table(

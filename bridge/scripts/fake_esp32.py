@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fake ESP32 MQTT publisher - local dev / demo.
 
-Publishes realistic telemetry to rempah/{FAKE_DEVICE_ID}/telemetry at 5-second
+Publishes realistic telemetry to rempah/{FAKE_DEVICE_ID}/telemetry at 2-second
 cadence and an initial retained state message to rempah/{FAKE_DEVICE_ID}/state.
+Cadence is configurable via FEED_INTERVAL (seconds).
 Replaces the direct-REST scripts/demo_feeder.py once the Bridge is running.
 
 Usage (local mosquitto, no TLS):
@@ -42,7 +43,7 @@ DEVICE_USERNAME  = os.environ.get("FAKE_DEVICE_USERNAME") or os.environ.get("MQT
 DEVICE_PASSWORD  = os.environ.get("FAKE_DEVICE_PASSWORD") or os.environ.get("MQTT_PASSWORD", "")
 DEVICE_ID        = os.environ.get("FAKE_DEVICE_ID", "1a1a0000-0000-4000-8000-000000000001")
 INITIAL_MODE     = os.environ.get("FAKE_DEVICE_MODE", "DISTILLING")
-INTERVAL         = float(os.environ.get("FEED_INTERVAL", "5"))
+INTERVAL         = float(os.environ.get("FEED_INTERVAL", "2"))
 
 T0 = time.time()
 

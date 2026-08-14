@@ -45,12 +45,18 @@ const deviceHistory = computed(() =>
 const latest = computed(
   () => deviceHistory.value[deviceHistory.value.length - 1] || {}
 );
+// Sparkline hanya menampilkan jendela pendek (60 titik terakhir, ~2 menit @2s
+// atau ~5 menit @5s) — jendela penuh 240 titik membuat pergerakan tiap tick
+// hanya ~1px sehingga chart terlihat beku walau re-render tepat waktu.
+const SPARK_POINTS = 60;
 const sparkTemp = computed(() =>
-  deviceHistory.value.map((r) => r.boiler_temp_c)
+  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.boiler_temp_c)
 );
-const sparkGas = computed(() => deviceHistory.value.map((r) => r.gas_mass_kg));
+const sparkGas = computed(() =>
+  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.gas_mass_kg)
+);
 const sparkWater = computed(() =>
-  deviceHistory.value.map((r) => r.water_level)
+  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.water_level)
 );
 const sparkYield = computed(() =>
   batchLog.value && batch.value ? [batchLog.value.estimated_yield || 0] : [0]

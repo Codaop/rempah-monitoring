@@ -3,43 +3,144 @@
 Cara menjalankan komponen dari sesi development saat ini. Teknis dalam bahasa
 Inggris; penjelasan dalam Bahasa Indonesia.
 
-## Kredensial & environment contract
+## Interpreter & environment contract
 
-- Semua kredensial hidup di luar repo (gitignored): `dashboard/.env` untuk kunci
-  client dan file env untuk session development. Tidak ada secret di git.
+- **Interpreter Python yang benar** untuk semua script bridge: full path ke
+  `C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe`.
+  Jangan pakai `python` polos dari PATH (`/c/Python314/python`) — ia **tidak**
+  punya `dotenv` dan `paho-mqtt`, dan akan gagal dengan
+  `ModuleNotFoundError: No module named 'dotenv'`.
+- Semua kredensial hidup di luar repo (gitignored): `bridge/.env` untuk
+  kredensial MQTT + Supabase service-role, `dashboard/.env` untuk kunci client.
+  Tidak ada secret di git.
+- `bridge/.env` (wajib untuk bridge & fake ESP; otomatis dimuat oleh script):
+  `MQTT_BROKER`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`; opsional `MQTT_TOPIC_ROOT`
+  (default `rempah`).
+- `dashboard/.env`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - Supabase: **anon key** dipakai dashboard client (RLS via JWT operator); key
-  **service-role** hanya untuk Bridge/demo feeder (bypass RLS).
-- Project ref/URL: lihat `dashboard/.env` (`VITE_SUPABASE_URL`).
+  **service-role** hanya untuk Bridge/fake ESP (bypass RLS).
+- Project ref/URL: lihat `bridge/.env` (`SUPABASE_URL`).
 
-## 1. Demo feeder (fake ESP32)
-
-Menghasilkan telemetri live (2 perangkat, cadence 5 detik) ke Supabase via
-`service-role` — pengganti sementara path ESP32→MQTT→Bridge sampai pipeline MQTT
-real selesai (ticket 07).
+## 0. Workflow ringkas (3 terminal)
 
 ```bash
-SUPABASE_SERVICE_KEY=<service-role key> \
-  setsid nohup python3 scripts/demo_feeder.py </dev/null >/tmp/feeder.log 2>&1 &
+# Terminal A — Bridge (harus jalan duluan, service)
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" -m rempah_bridge
+
+# Terminal B — Fake ESP32 (simulasi device, publish telemetry)
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+
+# Terminal C — Dashboard (dev server, hot-reload)
+cd dashboard
+npm run dev
 ```
 
-- Log: `tail -f /tmp/feeder.log`
-- Hentikan: `kill $(pgrep -f "demo_feeder[.]py")`
-- Cadence: env `FEED_INTERVAL` (detik).
+Buka `http://localhost:5173`, login sebagai operator, dan dashboard akan
+menerima data realtime tiap ~2 detik.
 
-## 2. Realtime smoke test
+## 1. Bridge (service MQTT → Supabase)
 
-Memverifikasi path login + Realtime (`postgres_changes`) scoped RLS:
+Menjalankan pipeline telemetry: subscribe `rempah/+/telemetry` & `rempah/+/state`
+dari broker, insert ke `sensor_logs`/`device_state`, forward command, deteksi
+offline, purge retention.
+
+```bash
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" -m rempah_bridge
+```
+
+- Baca kredensial dari `bridge/.env`; gagal start bila ada var wajib kosong.
+- 3 thread latar: cmd-poll (2s), offline-check (30s), purge (harian) — lihat
+  `rempah_bridge/__main__.py`.
+
+## 2. Fake ESP32 (device simulasi)
+
+Menggantikan `scripts/demo_feeder.py` (sudah tidak dipakai — pipeline kini
+lewat MQTT sungguhan). Mempublish telemetry ke
+`rempah/{FAKE_DEVICE_ID}/telemetry` dengan cadence default **2 detik**, plus
+state retained di `rempah/{FAKE_DEVICE_ID}/state`. Otomatis memuat `bridge/.env`
+(kredensial broker & topik root).
+
+```bash
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+```
+
+- Log telemetry tampil di terminal tiap cadence.
+- Env yang bisa di-override:
+  - `FEED_INTERVAL` — cadence detik (default `2`).
+  - `FAKE_DEVICE_ID` — UUID device (default
+    `1a1a0000-0000-4000-8000-000000000001`).
+  - `FAKE_DEVICE_MODE` — mode state awal (default `DISTILLING`).
+  - `FAKE_DEVICE_USERNAME` / `FAKE_DEVICE_PASSWORD` — fallback ke
+    `MQTT_USERNAME`/`MQTT_PASSWORD` dari `bridge/.env`.
+- Contoh interval 1 detik:
+  ```bash
+  FEED_INTERVAL=1 "C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+  ```
+- Contoh device kedua (UUID berbeda, mode IDLE):
+  ```bash
+  FAKE_DEVICE_ID=4d4d0000-0000-4000-8000-000000000002 \
+  FAKE_DEVICE_MODE=IDLE \
+  "C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+  ```
+  Pastikan device ID sudah terdaftar di tabel `devices`, kalau tidak bridge
+  mencatatnya sebagai unknown device (ticket 43).
+
+### Restart (mis. ganti interval)
+
+```bash
+# 1. Hentikan fake ESP (ganti PID sesuai hasil cek)
+powershell -Command "Get-CimInstance Win32_Process -Filter \"name like '%python%'\" | Select-Object ProcessId,CommandLine | Format-List"
+powershell -Command "Stop-Process -Id <PID> -Force"
+
+# 2. Pastikan bridge masih hidup (jangan di-stop), lalu jalankan ulang fake ESP
+powershell -Command "Get-CimInstance Win32_Process -Filter \"name like '%python%'\" | Select-Object ProcessId,CommandLine | Format-List"
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+```
+
+### Detached background (tetap jalan walau terminal ditutup)
+
+```powershell
+Start-Process -FilePath 'C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe' `
+  -ArgumentList 'scripts/fake_esp32.py' `
+  -WorkingDirectory 'C:\Users\MSA-DESKTOP\Desktop\rempah-monitoring\bridge' `
+  -WindowStyle Hidden
+```
+
+## 2b. Verifikasi delay realtime (dashboard ↔ broker)
+
+Jika data di broker cepat tapi dashboard lambat: subscription Realtime
+(`postgres_changes`) dashboard bisa mati bila ada binding ke tabel yang tidak
+ada di publikasi `supabase_realtime` — channel ikut ditutup server dan
+dashboard jatuh ke polling fallback 30 detik. Pastikan tabel yang dipakai
+dashboard (termasuk `unknown_messages`, `devices`, `batch_logs`) ada di
+publikasi:
+
+```sql
+select schemaname, tablename from pg_publication_tables
+where pubname = 'supabase_realtime';
+```
+
+## 2c. Realtime smoke test (jalur browser: anon + JWT operator)
+
+Memverifikasi path login + Realtime (`postgres_changes`) scoped RLS persis
+seperti browser:
 
 ```bash
 cd dashboard
 SUPABASE_URL=<url> SUPABASE_ANON_KEY=<anon key> \
 EMAIL=<operator email> PASSWORD=<operator password> \
-node --experimental-websocket scripts/realtime-smoke.mjs
+node scripts/realtime-smoke.mjs
 ```
 
 Node < 22 butuh flag `--experimental-websocket`; browser tidak (WebSocket native).
 
-## 2b. MQTT topic probe (sudah terhubung ke broker belum?)
+## 2d. MQTT topic probe (sudah terhubung ke broker belum?)
 
 Memverifikasi koneksi MQTT dan trafik topic `rempah/#` pakai kredensial yang
 sama dengan `bridge/.env` (otomatis dimuat):
@@ -69,18 +170,32 @@ python bridge/scripts/mqtt_pub.py --topic 'topik-ku/device1/data' --message '{"t
 ```
 
 - Pesan muncul di Terminal 1 = data dari publish benar-benar sampai di topic.
-`--retain` membuat pesan tersimpan di broker dan langsung diterima subscriber
-baru. Catatan: probe/pub hanyalah alat uji pasif — bridge hanya menelan topic
-`rempah/+/telemetry` & `rempah/+/state` (kontrak ticket 14 & 39); root topic
-ditetapkan `rempah/` — device asli harus memakai UUID `devices.id` di segmen
-topic dan `client_id` unik di firmware (lihat `docs/mqtt-provisioning.md`).
+  `--retain` membuat pesan tersimpan di broker dan langsung diterima subscriber
+  baru. Catatan: probe/pub hanyalah alat uji pasif — bridge hanya menelan topic
+  `rempah/+/telemetry` & `rempah/+/state` (kontrak ticket 14 & 39); root topic
+  ditetapkan `rempah/` — device asli harus memakai UUID `devices.id` di segmen
+  topic dan `client_id` unik di firmware (lihat `docs/mqtt-provisioning.md`).
+
+## 2e. E2E live check (otomatis)
+
+Menjalankan bridge + fake ESP32 nyata dan memverifikasi seluruh pipeline sampai
+Supabase: telemetry masuk, command round-trip, batch close, offline detection.
+
+```bash
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/e2e_live_check.py
+```
+
+- **Jangan** dijalankan bersamaan dengan instance bridge/fake_esp32 lain
+  (duplikat `client_id` MQTT).
+- Output `[PASS]/[FAIL]` per fase; exit code non-zero bila ada fase gagal.
 
 ## 3. Dashboard
 
 ```bash
 cd dashboard
 npm install --prefer-offline   # lambat di network kecil; prefer-offline membantu
-npm run dev                    # dev server
+npm run dev                    # dev server (hot-reload di localhost:5173)
 npm run build                  # menghasilkan dist/ statik
 ```
 
@@ -91,7 +206,10 @@ npm run build                  # menghasilkan dist/ statik
 ## 4. Database (Supabase, project REM-PAH)
 
 - Schema + RLS: migration `rempah_schema_and_rls` (ticket 01 — done).
-- Realtime aktif: `sensor_logs`, `device_state`, `batches`, `commands`.
+- Realtime aktif: `sensor_logs`, `device_state`, `batches`, `commands`, plus
+  `unknown_messages`, `devices`, `batch_logs` (migration
+  `add_missing_tables_to_realtime_publication` — tanpanya channel realtime
+  dashboard mati dan fallback polling 30 detik yang dipakai).
 - Seed demo: producer "Rempah Jaya", operator `admin@gmail.com`, 2 perangkat,
   1 session, 1 batch — hanya untuk demo.
 - RLS: operator hanya melihat data `producer_id` miliknya; `service-role` bypass.
