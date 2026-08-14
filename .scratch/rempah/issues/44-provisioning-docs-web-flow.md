@@ -6,6 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] Dokumen menjelaskan model kredensial bersama (satu credential di HiveMQ console, topik root `rempah/`, pembeda = `device_id` di topik + `client_id` unik di firmware)
-- [ ] Alur tercantum langkah per langkah: registrasi → kartu flash sebagai referensi nilai → konfigurasi awal firmware oleh developer (USB/serial) → verifikasi online di dashboard
-- [ ] Dokumen menjelaskan bahwa `client_id` unik (mis. `client-<device_id>`) di-set di firmware ESP32, bukan di web HiveMQ console — dan bahwa setup pertama selalu manual oleh developer (ESP32 baru tidak punya firmware); WiFi-AP provisioning hanya dicatat sebagai opsi konfigurasi ulang masa depan
+- [x] Dokumen menjelaskan model kredensial bersama (satu credential di HiveMQ console, topik root `rempah/`, pembeda = `device_id` di topik + `client_id` unik di firmware)
+- [x] Alur tercantum langkah per langkah: registrasi → kartu flash sebagai referensi nilai → konfigurasi awal firmware oleh developer (USB/serial) → verifikasi online di dashboard
+- [x] Dokumen menjelaskan bahwa `client_id` unik (mis. `client-<device_id>`) di-set di firmware ESP32, bukan di web HiveMQ console — dan bahwa setup pertama selalu manual oleh developer (ESP32 baru tidak punya firmware); WiFi-AP provisioning hanya dicatat sebagai opsi konfigurasi ulang masa depan
+
+## Comments
+
+- 2026-08-14: `docs/mqtt-provisioning.md` ditulis ulang ke model kredensial bersama — root `rempah/` fixed, satu credential HiveMQ, pembeda `device_id` + `client_id` unik di firmware, alur web-driven 5 langkah, troubleshooting (device tak dikenal / banner > 7 hari), dan catatan WiFi-AP sebagai opsi masa depan. Payload contract (telemetry/state/command) dipertahankan. `docs/ops.md` bagian MQTT probe ikut disesuaikan (tidak lagi menyebut root env configurable).

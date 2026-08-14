@@ -1,22 +1,48 @@
 # MQTT Provisioning & Canonical Contract
 
-Checklist dan contoh payload untuk tim firmware ESP32. Broker: HiveMQ Cloud Serverless (ADR 0003).
+Panduan provisioning device distilasi ke broker MQTT dan kontrak payload untuk tim
+firmware ESP32. Broker: HiveMQ Cloud Serverless (ADR 0003).
 
 ---
 
-## Checklist Provisioning
+## Model kredensial & topik (keputusan tim, ticket 39)
 
-### 1. Buat akun HiveMQ Cloud
+- **Satu credential MQTT bersama** untuk semua device — dibuat **sekali** di web
+  HiveMQ console. Tidak ada username/password per-device.
+- **Root topik ditetapkan `rempah/`** — bukan env configurable.
+- **Pembeda antar unit**:
+  - `device_id` (UUID dari `devices.id` di Supabase) di segmen ke-2 topik;
+  - `client_id` MQTT **unik per perangkat**, di-set di **firmware ESP32**
+    (mis. `client-<device_id>`) — **bukan** di web HiveMQ console.
+    Web HiveMQ hanya dipakai untuk membuat credential bersama sekali.
+
+```
+rempah / {device_id} / telemetry|state|command
+   │          │                │
+ fixed    UUID devices.id     rutekan pesan (fixed)
+```
+
+---
+
+## Alur provisioning web-driven
+
+Kartu flash di dashboard adalah **lembar referensi nilai** untuk konfigurasi
+awal firmware — **bukan** mekanisme self-provisioning. ESP32 baru tidak punya
+firmware, jadi setup pertama selalu dilakukan developer secara manual
+(flash via USB/serial). Alurnya:
+
+### 1. Buat akun & credential bersama HiveMQ (sekali)
 
 - [ ] Daftar di [hivemq.com/mqtt-cloud-broker](https://www.hivemq.com/mqtt-cloud-broker/) (Free Serverless)
 - [ ] Catat **Cluster URL** (contoh: `abc123.s1.eu.hivemq.cloud`) dan **Port TLS: 8883**
-
-### 2. Buat credential Bridge
-
-- [ ] Di HiveMQ console → **Access Management** → tambah credential:
-  - Username: `rempah-bridge`
-  - Password: (generate acak, simpan di `.env`)
-- [ ] Simpan di `bridge/.env`:
+- [ ] Di HiveMQ console → **Access Management** → tambah **satu** credential
+      yang dipakai semua device, mis.:
+  - Username: `rempah-device`
+  - Password: (generate acak, simpan aman)
+- [ ] Set credential yang sama di env **dashboard** (`VITE_MQTT_DEVICE_USERNAME` /
+      `VITE_MQTT_DEVICE_PASSWORD`) agar kartu flash menampilkannya
+- [ ] Buat credential **Bridge** terpisah (username `rempah-bridge`) dan simpan
+      di `bridge/.env`:
   ```
   MQTT_BROKER=abc123.s1.eu.hivemq.cloud
   MQTT_PORT=8883
@@ -24,27 +50,58 @@ Checklist dan contoh payload untuk tim firmware ESP32. Broker: HiveMQ Cloud Serv
   MQTT_PASSWORD=<password>
   ```
 
-### 3. Buat credential per-device
+### 2. Daftarkan device via web
 
-Satu credential per ESP32 unit. Jangan berbagi credential antar device.
+- [ ] Buka dashboard → **Pengaturan** → **Manajemen Perangkat** →
+      **Daftarkan Perangkat Baru**, isi nama (mis. "Boiler Utama")
+- [ ] Sistem membuat baris `devices` dengan UUID; **kartu flash** muncul berisi
+      semua nilai referensi yang dibutuhkan firmware
 
-- [ ] Untuk setiap device, tambah credential di HiveMQ console:
-  - Username: `device-<device_id_pendek>` (contoh: `device-1a1a0000`)
-  - Password: (generate acak, flash ke firmware)
-- [ ] Catat username di kolom `devices.mqtt_username` di Supabase
+### 3. Kartu flash sebagai referensi nilai
 
-### 4. Konfigurasi firmware
+Kartu flash menampilkan (dapat dibuka lagi dari daftar perangkat kapan saja):
+
+| Nilai | Contoh |
+|---|---|
+| Device ID (UUID) | `1a1a0000-0000-4000-8000-000000000001` |
+| Topic telemetry | `rempah/1a1a0000-.../telemetry` |
+| Topic state | `rempah/1a1a0000-.../state` |
+| Topic command | `rempah/1a1a0000-.../command` |
+| MQTT username (bersama) | `rempah-device` |
+| MQTT password (bersama) | (dari env dashboard) |
+
+### 4. Konfigurasi awal firmware oleh developer (meja kerja, USB/serial)
 
 - [ ] Broker: host dari Cluster URL, port **8883** (TLS)
-- [ ] TLS: gunakan Let's Encrypt root CA (`ISRG Root X1`) — tersedia di ESP-IDF dan Arduino mbedTLS
+- [ ] TLS: gunakan Let's Encrypt root CA (`ISRG Root X1`) — tersedia di ESP-IDF
+      dan Arduino mbedTLS
 - [ ] TLS-SNI: aktifkan dan set ke hostname broker
-- [ ] MQTT client ID unik per device (bisa pakai `device_id`)
-- [ ] Username/password per device (dari langkah 3)
+- [ ] **MQQT client_id unik** per unit, mis. `client-1a1a0000-0000-4000-8000-000000000001`
+      — di-set di firmware, **bukan** di web HiveMQ
+- [ ] Username/password **bersama** (dari kartu flash)
+- [ ] Topic telemetry/state sesuai UUID device (dari kartu flash)
+- [ ] Flash firmware via USB/serial
+
+> **Catatan:** WiFi-AP provisioning (device jadi hotspot untuk di-set ulang tanpa
+> re-flash) dicatat sebagai opsi **masa depan** untuk konfigurasi ulang — bukan
+> target alur saat ini.
 
 ### 5. Verifikasi koneksi
 
-- [ ] Gunakan MQTTX (desktop) atau `mosquitto_sub` untuk subscribe ke `rempah/+/telemetry` dan konfirmasi pesan masuk
-- [ ] Cek Bridge log (`python -m rempah_bridge`) — harus muncul `"MQTT connected"` dan row baru di `sensor_logs`
+- [ ] Nyalakan device → device connect WiFi + MQTT → publish telemetry
+- [ ] Di dashboard, perangkat berubah **Online** (dalam < 60 detik) dan alert
+      **"terhubung pertama kali"** muncul — tanda provisioning berhasil end-to-end
+- [ ] Cek Bridge log (`python -m rempah_bridge`) — harus muncul `"MQTT connected"`
+      dan row baru di `sensor_logs`
+
+### Troubleshooting
+
+- **Device tak dikenal:** bridge mencatat pesan dari `device_id` yang tidak
+  terdaftar ke tabel `unknown_messages` dan dashboard menampilkan alert
+  "Pesan dari device tak dikenal …" — biasanya UUID di topik salah ketik atau
+  device salah flash.
+- **Menunggu koneksi pertama > 7 hari:** dashboard menampilkan banner peringatan
+  dengan tautan panduan ini; kemungkinan firmware belum dikonfigurasi.
 
 ---
 
@@ -147,47 +204,48 @@ Dikirim oleh Bridge ke device, QoS 1.
 
 ## Topic Summary
 
-Root topic bersifat konfigurabel lewat env `MQTT_TOPIC_ROOT` (default: `rempah`)
-di `bridge/.env`; semua komponen membangun topic dari root yang sama:
-`{MQTT_TOPIC_ROOT}/{device_id}/telemetry|state|command`.
+Root topic **ditetapkan `rempah/`** (keputusan tim, ticket 39). Semua komponen —
+bridge subscribe, forward command, fake_esp32, probe — memakai root yang sama.
 
 | Topic | Arah | QoS | Retained |
 |---|---|---|---|
-| `{root}/{device_id}/telemetry` | Device → Broker | 1 | ✗ |
-| `{root}/{device_id}/state` | Device → Broker | 1 | ✓ |
-| `{root}/{device_id}/command` | Bridge → Device | 1 | ✗ |
+| `rempah/{device_id}/telemetry` | Device → Broker | 1 | ✗ |
+| `rempah/{device_id}/state` | Device → Broker | 1 | ✓ |
+| `rempah/{device_id}/command` | Bridge → Device | 1 | ✗ |
 
-Bridge subscribe ke wildcard: `{root}/+/telemetry` dan `{root}/+/state`.
+Bridge subscribe ke wildcard: `rempah/+/telemetry` dan `rempah/+/state`.
 
-Struktur wajib 3 level (`root/device_id/type`) karena `on_message` di
+Struktur wajib 3 level (`rempah/device_id/type`) karena `on_message` di
 `__main__.py` meng-parse `topic.split("/")` dan membuang pesan yang bukan
 3 bagian; segmen ke-3 harus persis `telemetry` atau `state` agar dirutekan
 (selain itu di-drop diam-diam). Segmen ke-2 (device_id) harus cocok dengan
-`devices.id` di Supabase.
+`devices.id` di Supabase — kalau tidak cocok, bridge mencatat pesan sebagai
+device tak dikenal (tabel `unknown_messages` + alert di dashboard) alih-alih
+memprosesnya.
 
 ---
 
-## Panduan Personalisasi Topic (cara kerja segmen)
+## Struktur topik (cara kerja segmen)
 
 Setiap topic punya 3 segmen, dipisah `/`, masing-masing dengan peran berbeda:
 
 ```
-{root} / {device_id} / {type}
+rempah / {device_id} / {type}
    │          │            │
- namespace   kunci DB    rutekan pesan
- (bebas)     devices.id  (fixed)
+ fixed    kunci DB    rutekan pesan
+ (rempah) devices.id  (fixed)
 ```
 
 | # | Segmen | Boleh diganti? | Catatan |
 |---|---|---|---|
-| 1 | `root` | ✅ Bebas | Via env `MQTT_TOPIC_ROOT` di `bridge/.env`. Contoh: `rempah`, `bayunyoba`, `pabrik1`. Semua komponen otomatis ikut — tidak perlu edit kode. |
-| 2 | `device_id` | ⚠️ Terikat DB | Harus **persis** `devices.id` di Supabase (tipe UUID, mis. `1a1a0000-0000-4000-8000-000000000001`). Bridge memakainya untuk lookup: `insert_telemetry(device_id)` → `sensor_logs`, `device_state`, dsb. Nama bebas seperti `boiler` TIDAK akan ketemu → data tidak masuk DB. |
-| 3 | `type` | ❌ Fixed | Harus `telemetry`, `state`, atau `command`. `on_message` merutekan dari nilai ini; nilai lain di-drop diam-diam tanpa error. |
+| 1 | `root` | ❌ Fixed | Ditetapkan `rempah`. Tidak lagi env configurable. |
+| 2 | `device_id` | ⚠️ Terikat DB | Harus **persis** `devices.id` di Supabase (tipe UUID, mis. `1a1a0000-0000-4000-8000-000000000001`). Bridge memakainya untuk lookup: `insert_telemetry(device_id)` → `sensor_logs`, `device_state`, dsb. Nama bebas seperti `boiler` TIDAK akan ketemu → dicatat sebagai device tak dikenal. |
+| 3 | `type` | ❌ Fixed | Harus `telemetry`, `state`, atau `command`. `on_message` merutekan dari nilai ini; nilai lain di-drop diam-diam. |
 
 ### Alur parse di Bridge (kenapa 3 level)
 
 ```python
-parts = msg.topic.split("/")          # "bayunyoba/1a1a.../telemetry"
+parts = msg.topic.split("/")          # "rempah/1a1a.../telemetry"
 if len(parts) != 3: return             # bukan 3 level → dibuang
 _, device_id, msg_type = parts         # device_id = segmen 2
 if msg_type == "telemetry":
@@ -196,26 +254,12 @@ elif msg_type == "state":
     bridge.handle_state(payload)                  # device_id dibaca dari payload
 ```
 
-### Langkah personalisasi yang benar
-
-1. **Tentukan root** → set `MQTT_TOPIC_ROOT=bayunyoba` di `bridge/.env`.
-2. **Daftarkan device asli di Supabase** — id-nya UUID (boleh dibuat manual
-   seperti seed, atau `gen_random_uuid()`), lalu pakai UUID itu di segmen 2:
-   ```sql
-   insert into public.devices (id, producer_id, name)
-   values ('a1b2c3d4-...', '0d0d0000-0000-4000-8000-000000000001', 'Boiler Utama');
-   ```
-   Topic jadi: `bayunyoba/a1b2c3d4-.../telemetry`.
-3. **Jaga segmen 3 tetap `telemetry|state|command`** — firmware/publisher harus
-   memakai nama ini. Kalau device asli terlanjur pakai nama lain (mis. `data`),
-   tambahkan alias routing di `on_message` (`data` → treat sebagai telemetry).
-
-### Opsi lanjutan: nama ramah di topic (mis. `bayunyoba/boiler/telemetry`)
+### Nama ramah di topic (opsi lanjutan)
 
 Karena segmen 2 harus UUID, kalau ingin nama ramah (`boiler`) di topic, perlu
 sebuah lapisan alias: bridge me-resolve nama → UUID (mis. kolom `slug` di tabel
 `devices`, atau tabel pemetaan) sebelum lookup DB. Ini perubahan kode kecil di
-bridge — belum diimplementasikan. Pilih salah satu:
+bridge — **belum diimplementasikan**. Pilih salah satu:
 
 - **Opsi A (paling sederhana):** pakai UUID langsung di topic.
 - **Opsi B:** tambah kolom `slug`/`alias` di `devices`, bridge resolve dulu

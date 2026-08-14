@@ -71,10 +71,9 @@ python bridge/scripts/mqtt_pub.py --topic 'topik-ku/device1/data' --message '{"t
 - Pesan muncul di Terminal 1 = data dari publish benar-benar sampai di topic.
 `--retain` membuat pesan tersimpan di broker dan langsung diterima subscriber
 baru. Catatan: probe/pub hanyalah alat uji pasif — bridge hanya menelan topic
-`{MQTT_TOPIC_ROOT}/+/telemetry` & `{MQTT_TOPIC_ROOT}/+/state` (kontrak ticket
-14); root ditentukan lewat env `MQTT_TOPIC_ROOT` di `bridge/.env` (default
-`rempah`) — kalau device asli pakai root lain, cukup ubah variabel itu, tidak
-perlu edit kode.
+`rempah/+/telemetry` & `rempah/+/state` (kontrak ticket 14 & 39); root topic
+ditetapkan `rempah/` — device asli harus memakai UUID `devices.id` di segmen
+topic dan `client_id` unik di firmware (lihat `docs/mqtt-provisioning.md`).
 
 ## 3. Dashboard
 

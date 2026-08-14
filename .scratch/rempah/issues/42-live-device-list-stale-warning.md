@@ -6,6 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] Status device berubah live saat telemetry masuk, tanpa refresh manual
-- [ ] Banner peringatan muncul untuk device yang belum pernah terhubung > 7 hari sejak didaftarkan, lengkap dengan tautan panduan
-- [ ] Subscription realtime dibersihkan saat komponen unmount (tidak ada leak)
+- [x] Status device berubah live saat telemetry masuk, tanpa refresh manual
+- [x] Banner peringatan muncul untuk device yang belum pernah terhubung > 7 hari sejak didaftarkan, lengkap dengan tautan panduan
+- [x] Subscription realtime dibersihkan saat komponen unmount (tidak ada leak)
+
+## Comments
+
+- 2026-08-14: Implementasi di DeviceManager.vue — subscription postgres_changes UPDATE + INSERT `devices` (channel `device-manager-live`) memperbarui `last_seen_at`/`first_seen_at` pada baris lokal; di-cleanup di onBeforeUnmount via removeChannel. Banner `staleDevices` (created_at > 7 hari & first_seen_at null) dengan tombol "Kartu Flash" per device + tautan panduan `docs/mqtt-provisioning.md` (GitHub, target _blank). Load select device menyertakan `first_seen_at`.
