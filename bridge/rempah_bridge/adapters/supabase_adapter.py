@@ -90,14 +90,17 @@ class SupabaseDbAdapter:
         # This method intentionally a no-op — set_last_seen carries the information.
         pass
 
-    def note_first_contact(self, device_id: str, ts: str) -> None:
+    def note_first_contact(self, device_id: str, ts: float) -> None:
         """Handshake koneksi pertama (ticket 41): catat first_seen_at sekali.
 
         Dipanggil saat telemetry/state pertama dari sebuah device. Jika
         first_seen_at belum terisi, tulis timestamp ini dan buat alert
         "perangkat terhubung pertama kali" — penanda provisioning berhasil.
-        Reconnect tidak menimpa nilai yang sudah ada.
+        Reconnect tidak menimpa nilai yang sudah ada. `ts` adalah waktu terima
+        bridge (epoch float), diformat ke ISO di sini agar konsisten dengan
+        set_last_seen dan tidak bergantung pada `ts` payload yang bisa usang.
         """
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
         try:
             resp = (
                 self._client.table("devices")
@@ -109,7 +112,7 @@ class SupabaseDbAdapter:
             if not resp.data or resp.data.get("first_seen_at"):
                 return
             self._client.table("devices").update(
-                {"first_seen_at": ts}
+                {"first_seen_at": dt}
             ).eq("id", device_id).execute()
             name = resp.data.get("name") or device_id[:8]
             producer_id = self._resolve_producer(device_id)
@@ -119,7 +122,7 @@ class SupabaseDbAdapter:
                     "producer_id": producer_id,
                     "kind": "device_first_seen",
                     "value": 0.0,
-                    "ts": ts,
+                    "ts": dt,
                 }
             ).execute()
             logger.info("first contact recorded for device %s (%s)", device_id[:8], name)

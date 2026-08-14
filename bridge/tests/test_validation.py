@@ -54,7 +54,7 @@ class FakeDb:
     def set_last_seen(self, device_id: str, ts: float) -> None:
         self.last_seen[device_id] = ts
 
-    def note_first_contact(self, device_id: str, ts: str) -> None:
+    def note_first_contact(self, device_id: str, ts: float) -> None:
         self.first_contacts.append((device_id, ts))
 
     def is_known_device(self, device_id: str) -> bool:
@@ -364,7 +364,7 @@ def test_draining_is_neither_heating_nor_terminal(mqtt: FakeMqtt) -> None:
 
 def test_telemetry_records_first_contact(mqtt: FakeMqtt) -> None:
     db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
-    bridge = Bridge(mqtt=mqtt, db=db)
+    bridge = Bridge(mqtt=mqtt, db=db, clock=lambda: 1060.0)
     payload = {
         "ts": "2026-08-11T10:00:00Z",
         "boiler_temp_c": 95.0,
@@ -376,12 +376,13 @@ def test_telemetry_records_first_contact(mqtt: FakeMqtt) -> None:
 
     bridge.handle_telemetry("d1", payload)
 
-    assert db.first_contacts == [("d1", "2026-08-11T10:00:00Z")]
+    # first_seen_at memakai waktu terima bridge, bukan ts payload yang usang.
+    assert db.first_contacts == [("d1", 1060.0)]
 
 
 def test_state_records_first_contact(mqtt: FakeMqtt) -> None:
     db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
-    bridge = Bridge(mqtt=mqtt, db=db)
+    bridge = Bridge(mqtt=mqtt, db=db, clock=lambda: 1070.0)
     payload = {
         "device_id": "d1",
         "mode": "DISTILLING",
@@ -391,7 +392,8 @@ def test_state_records_first_contact(mqtt: FakeMqtt) -> None:
 
     bridge.handle_state(payload)
 
-    assert db.first_contacts == [("d1", "2026-08-11T10:05:00Z")]
+    # first_seen_at memakai waktu terima bridge, bukan ts payload yang usang.
+    assert db.first_contacts == [("d1", 1070.0)]
 
 
 def test_telemetry_from_unknown_device_is_recorded_not_persisted(mqtt: FakeMqtt) -> None:

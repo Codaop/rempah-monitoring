@@ -60,10 +60,14 @@ class Bridge:
                 device_id, f"{self.topic_root}/{device_id}/telemetry", payload
             )
             return
+        # Timestamp first contact memakai waktu terima bridge, bukan `ts` dari
+        # payload — retained state lama bisa membawa `ts` usang dan membuat
+        # first_seen_at mencatat waktu yang salah (ticket 41).
+        now = self.clock()
         self.db.insert_telemetry(device_id, payload)
-        self.db.set_last_seen(device_id, self.clock())
+        self.db.set_last_seen(device_id, now)
         self.db.set_offline(device_id, False)
-        self.db.note_first_contact(device_id, payload.get("ts") or "")
+        self.db.note_first_contact(device_id, now)
         temp = payload.get("boiler_temp_c")
         if temp is not None and temp > self.over_temp_threshold_c:
             self.db.insert_alert(device_id, "over_temperature", temp, payload.get("ts"))
@@ -85,7 +89,7 @@ class Bridge:
         ts = payload["ts"]
         previous = self.db.device_state(device_id)  # read before overwriting
         self.db.set_device_state(device_id, mode, ts)
-        self.db.note_first_contact(device_id, ts)
+        self.db.note_first_contact(device_id, self.clock())
         cause = payload.get("cause", "")
         if cause.startswith("command_executed:"):
             self.db.mark_command(cause.split(":", 1)[1], "succeeded")
