@@ -9,6 +9,7 @@ import AppModal from "./AppModal.vue";
 // root yang sama.
 const TOPIC_ROOT = "rempah";
 const OFFLINE_MS = 60000;
+const STALE_DAYS = 7; // device terdaftar lama tanpa koneksi pertama (ticket 42)
 
 // Kredensial MQTT bersama (shared credential) — satu username/password untuk
 // semua device, di-set di env dashboard (VITE_MQTT_DEVICE_*). Kalau kosong,
@@ -44,10 +45,27 @@ function mqttTopics(deviceId) {
   };
 }
 
-function deviceOnline(d) {
+// Status lifecycle jujur (ticket 40): belum pernah ada telemetry →
+// "Menunggu koneksi pertama"; last_seen_at segar → Online; kedaluwarsa →
+// Offline. Tidak ada lagi state "belum ter-provision" yang menyesatkan.
+function deviceStatus(d) {
+  if (!d.last_seen_at)
+    return { label: "Menunggu koneksi pertama", cls: "wait" };
   const ms = offlineSince(d.last_seen_at);
-  return ms >= 0 && ms < OFFLINE_MS;
+  if (ms >= 0 && ms < OFFLINE_MS) return { label: "Online", cls: "ok" };
+  return { label: "Offline", cls: "off" };
 }
+
+// Device yang sudah lama terdaftar tapi belum pernah terhubung (ticket 42) —
+// kemungkinan besar firmware belum dikonfigurasi, jangan biarkan operator
+// menunggu tanpa tahu.
+const staleDevices = computed(() => {
+  const cutoff = Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000;
+  return devices.value.filter((d) => {
+    if (d.first_seen_at) return false;
+    return d.created_at && new Date(d.created_at).getTime() < cutoff;
+  });
+});
 
 function shortId(id) {
   return id ? id.slice(0, 8).toUpperCase() : "—";
@@ -59,7 +77,7 @@ async function loadDevices() {
   const { data, error } = await supabase
     .from("devices")
     .select(
-      "id, producer_id, name, mqtt_username, mqtt_password, last_seen_at, created_at"
+      "id, producer_id, name, mqtt_username, mqtt_password, last_seen_at, first_seen_at, created_at"
     )
     .order("created_at", { ascending: true });
   if (error) {
@@ -128,8 +146,45 @@ async function copyText(label, text) {
   }
 }
 
-onMounted(loadDevices);
-onBeforeUnmount(() => clearTimeout(copyTimer));
+// ── Live update daftar device (ticket 42) ────────────────────────────────────
+// Status Online/Offline berubah otomatis saat telemetry masuk (UPDATE devices
+// oleh bridge men-set last_seen_at), tanpa refresh manual.
+let realtime = null;
+
+function setupRealtime() {
+  realtime = supabase
+    .channel("device-manager-live")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "devices" },
+      (payload) => {
+        const d = devices.value.find((x) => x.id === payload.new.id);
+        if (d) {
+          d.last_seen_at = payload.new.last_seen_at || d.last_seen_at;
+          d.first_seen_at = payload.new.first_seen_at || d.first_seen_at;
+        }
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "devices" },
+      (payload) => {
+        if (!devices.value.some((x) => x.id === payload.new.id)) {
+          devices.value.push(payload.new);
+        }
+      }
+    )
+    .subscribe();
+}
+
+onMounted(async () => {
+  await loadDevices();
+  setupRealtime();
+});
+onBeforeUnmount(() => {
+  clearTimeout(copyTimer);
+  realtime && supabase.removeChannel(realtime);
+});
 </script>
 
 <template>
@@ -166,6 +221,40 @@ onBeforeUnmount(() => clearTimeout(copyTimer));
     <!-- Daftar perangkat (ticket 38) -->
     <div class="list-card">
       <h3 class="reg-title">Perangkat Terdaftar</h3>
+
+      <!-- Peringatan provisioning menggantung (ticket 42) -->
+      <div v-if="staleDevices.length" class="stale-banner">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <div class="stale-body">
+          <strong>Perangkat belum pernah terhubung:</strong>
+          <span v-for="d in staleDevices" :key="d.id" class="stale-chip">
+            {{ d.name }}
+            <button class="stale-btn" @click="reflash = d">Kartu Flash</button>
+          </span>
+          <a
+            class="stale-guide"
+            href="https://github.com/Codaop/rempah-monitoring/blob/dev/docs/mqtt-provisioning.md"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Panduan provisioning ↗
+          </a>
+        </div>
+      </div>
+
       <p v-if="loading" class="muted">Memuat perangkat…</p>
       <p v-else-if="devices.length === 0" class="muted">
         Belum ada perangkat terdaftar.
@@ -189,10 +278,15 @@ onBeforeUnmount(() => clearTimeout(copyTimer));
               <td>
                 <span
                   class="status-chip"
-                  :class="deviceOnline(d) ? 'ok' : 'off'"
+                  :class="deviceStatus(d).cls"
+                  :title="
+                    d.last_seen_at
+                      ? 'Terakhir terlihat ' + fmtDateTime(d.last_seen_at)
+                      : ''
+                  "
                 >
                   <span class="chip-dot"></span>
-                  {{ deviceOnline(d) ? "Online" : "Offline" }}
+                  {{ deviceStatus(d).label }}
                 </span>
               </td>
               <td>
@@ -535,11 +629,76 @@ onBeforeUnmount(() => clearTimeout(copyTimer));
   color: var(--danger);
 }
 
+.status-chip.wait {
+  background: #eef2f6;
+  color: var(--muted);
+}
+
 .chip-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: currentColor;
+}
+
+/* Banner peringatan provisioning menggantung (ticket 42) */
+.stale-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #fdf7e0;
+  border: 1px solid #f0e2a8;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  color: var(--warn);
+}
+
+.stale-banner svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.stale-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--navy);
+  min-width: 0;
+}
+
+.stale-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #f0e2a8;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-weight: 600;
+}
+
+.stale-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.stale-guide {
+  color: var(--teal);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.stale-guide:hover {
+  text-decoration: underline;
 }
 
 .flash-btn {
