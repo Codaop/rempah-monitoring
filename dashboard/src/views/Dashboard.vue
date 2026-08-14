@@ -158,6 +158,25 @@ async function loadAll() {
     mode: (states.find((s) => s.device_id === d.id) || {}).mode || "IDLE",
   }));
 
+  // Landaskan grafik ke perangkat yang paling hidup: yang punya batch aktif,
+  // atau yang telemetry-nya paling segar. Tanpa ini operator bisa mendarat di
+  // unit idle (mis. index 0) dan sparkline tampak beku meski unit lain
+  // mengalir realtime.
+  const activeBatchDeviceId = batchRes.data?.[0]?.device_id;
+  const liveIdx = devices.value.findIndex((d) => d.id === activeBatchDeviceId);
+  if (liveIdx >= 0) {
+    selectedIdx.value = liveIdx;
+  } else {
+    const freshest = devices.value.reduce(
+      (best, d, i) => {
+        const t = d.last_seen_at ? new Date(d.last_seen_at).getTime() : 0;
+        return t > best.t ? { t, i } : best;
+      },
+      { t: 0, i: 0 }
+    );
+    selectedIdx.value = freshest.i;
+  }
+
   batch.value = batchRes.data?.[0] || null;
   // batch_logs hanya relevan saat batch aktif (ticket 35: metrik idle datang
   // langsung dari telemetry, bukan dari batch).
@@ -191,9 +210,11 @@ async function loadAll() {
 }
 
 async function refreshQuiet() {
+  if (!activeDeviceId.value) return;
   const { data } = await supabase
     .from("sensor_logs")
     .select("*")
+    .eq("device_id", activeDeviceId.value)
     .order("ts", { ascending: false })
     .limit(1);
   if (data?.[0]) {
