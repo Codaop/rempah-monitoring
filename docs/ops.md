@@ -41,6 +41,53 @@ npm run dev
 Buka `http://localhost:5173`, login sebagai operator, dan dashboard akan
 menerima data realtime tiap ~2 detik.
 
+## 0a. START & STOP — ringkasan cepat
+
+Acuan harian untuk memulai dan menghentikan layanan.
+
+### Mulai semua layanan (3 terminal)
+
+Terminal A:
+```bash
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" -m rempah_bridge
+```
+
+Terminal B:
+```bash
+cd bridge
+"C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+```
+
+Terminal C:
+```bash
+cd dashboard
+npm run dev
+```
+
+Buka http://localhost:5173, login sebagai operator.
+
+### Hentikan semua sekaligus
+
+```powershell
+Stop-Process -Name python -Force
+```
+⚠️ Menghentikan **semua** proses Python — pastikan tidak ada script lain yang berjalan.
+
+### Hentikan per-layanan
+
+| Tindakan | Perintah |
+| --- | --- |
+| Cek proses jalan | `Get-CimInstance Win32_Process \| Where-Object { $_.CommandLine -like '*rempah*' }` |
+| Stop bridge | `Stop-Process -Id <PID> -Force` (ganti PID dari kolom ProcessId) |
+| Stop fake ESP | Sama seperti bridge, filter command line berisi `fake_esp` |
+| Stop dashboard | Tekan `Ctrl+C` di terminal dev server |
+
+Lihat detail lengkap:
+• [Bridge — §1 →](#1-bridge-service-mqtt--supabase)
+• [Fake ESP32 — §2 →](#2-fake-esp32-device-simulasi)
+• [Dashboard — §3 →](#3-dashboard)
+
 ## 1. Bridge (service MQTT → Supabase)
 
 Menjalankan pipeline telemetry: subscribe `rempah/+/telemetry` & `rempah/+/state`
@@ -55,6 +102,15 @@ cd bridge
 - Baca kredensial dari `bridge/.env`; gagal start bila ada var wajib kosong.
 - 3 thread latar: cmd-poll (2s), offline-check (30s), purge (harian) — lihat
   `rempah_bridge/__main__.py`.
+
+### STOP — hentikan bridge
+
+```bash
+# Opsi A: tekan Ctrl+C di terminal bridge
+# Opsi B: cari PID lalu stop
+powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*rempah_bridge*' }" | Select-Object ProcessId, CommandLine
+powershell -Command "Stop-Process -Id <PID> -Force"
+```
 
 ## 2. Fake ESP32 (device simulasi)
 
@@ -190,6 +246,30 @@ cd bridge
   (duplikat `client_id` MQTT).
 - Output `[PASS]/[FAIL]` per fase; exit code non-zero bila ada fase gagal.
 
+### STOP — hentikan fake ESP32
+
+```bash
+# Opsi A: tekan Ctrl+C di terminal fake ESP
+# Opsi B: cari PID lalu stop
+powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*fake_esp*' }"
+powershell -Command "Stop-Process -Id <PID> -Force"
+```
+
+> 💡 Menghentikan fake ESP32 **tidak** menghapus data yang sudah masuk ke Supabase.
+> Data tetap ada di dashboard — kamu hanya berhenti mengirim data baru dari simulasi.
+
+### Restart (mis. ganti interval)
+
+```bash
+# 1. Hentikan fake ESP lama
+powershell -Command "Stop-Process -Id <PID> -Force"
+# 2. Jalankan ulang dengan env baru
+cd bridge
+FEED_INTERVAL=1 "C:\Users\MSA-DESKTOP\AppData\Local\Python\pythoncore-3.14-64\python.exe" scripts/fake_esp32.py
+```
+
+---
+
 ## 3. Dashboard
 
 ```bash
@@ -202,6 +282,15 @@ npm run build                  # menghasilkan dist/ statik
 - Config: `dashboard/.env` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
   (gitignored).
 - `dist/` bisa diserve oleh Vercel/Netlify/CDN apa pun.
+
+### STOP — hentikan dashboard
+
+Tekan `Ctrl+C` di terminal dev server. Untuk paksa mati bila stuck:
+
+```bash
+powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*vite*' -or $_.CommandLine -like '*node*' }" | Select-Object ProcessId, CommandLine
+powershell -Command "Stop-Process -Id <PID> -Force"
+```
 
 ## 4. Database (Supabase, project REM-PAH)
 
