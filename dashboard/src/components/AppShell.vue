@@ -6,10 +6,18 @@ import { offlineSince } from "../lib/format";
 
 const router = useRouter();
 
-const nav = [
-  { name: "dashboard", label: "Dasbor" },
-  { name: "analytics", label: "Analitik & Log" },
-  { name: "profile", label: "Profil" },
+const navGroups = [
+  {
+    label: "Utama",
+    items: [
+      { name: "dashboard", label: "Dasbor" },
+      { name: "analytics", label: "Analitik & Log" },
+    ],
+  },
+  {
+    label: "Pengaturan",
+    items: [{ name: "settings", label: "Pengaturan" }],
+  },
 ];
 
 // ── Status batch aktif + perangkat tersedia (untuk tombol sidebar) ─────────
@@ -22,7 +30,7 @@ const anyDeviceAvailable = computed(() =>
   devices.value.some((d) => {
     if (!d.mode || d.mode !== "IDLE") return false;
     const ms = offlineSince(d.last_seen_at);
-    return ms >= 0 && ms < 45000;
+    return ms >= 0 && ms < 60000; // konsisten OFFLINE_AFTER_S bridge
   })
 );
 
@@ -94,61 +102,66 @@ onBeforeUnmount(() => clearInterval(timer));
       </div>
 
       <nav class="nav">
-        <router-link
-          v-for="item in nav"
-          :key="item.name"
-          :to="{ name: item.name }"
-          class="nav-item"
-          active-class="active"
-        >
-          <!-- Dashboard icon -->
-          <svg
-            v-if="item.name === 'dashboard'"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+        <template v-for="group in navGroups" :key="group.label">
+          <div class="nav-group-label">{{ group.label }}</div>
+          <router-link
+            v-for="item in group.items"
+            :key="item.name"
+            :to="{ name: item.name }"
+            class="nav-item"
+            active-class="active"
           >
-            <rect width="7" height="7" x="3" y="3" rx="1" />
-            <rect width="7" height="7" x="14" y="3" rx="1" />
-            <rect width="7" height="7" x="3" y="14" rx="1" />
-            <rect width="7" height="7" x="14" y="14" rx="1" />
-          </svg>
-          <!-- Analytics icon -->
-          <svg
-            v-if="item.name === 'analytics'"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-          <!-- Profile icon -->
-          <svg
-            v-if="item.name === 'profile'"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="8" r="4" />
-            <path d="M20 21a8 8 0 0 0-16 0" />
-          </svg>
-          <span>{{ item.label }}</span>
-        </router-link>
+            <!-- Dashboard icon -->
+            <svg
+              v-if="item.name === 'dashboard'"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect width="7" height="7" x="3" y="3" rx="1" />
+              <rect width="7" height="7" x="14" y="3" rx="1" />
+              <rect width="7" height="7" x="3" y="14" rx="1" />
+              <rect width="7" height="7" x="14" y="14" rx="1" />
+            </svg>
+            <!-- Analytics icon -->
+            <svg
+              v-if="item.name === 'analytics'"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            <!-- Settings (gear) icon -->
+            <svg
+              v-if="item.name === 'settings'"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.09a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+              />
+            </svg>
+            <span>{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
 
       <div class="side-foot" v-if="hasActiveBatch">
@@ -237,6 +250,18 @@ onBeforeUnmount(() => clearInterval(timer));
   flex-direction: column;
   gap: 2px;
   flex: 1;
+}
+
+.nav-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 14px 12px 4px;
+}
+.nav-group-label:first-child {
+  padding-top: 0;
 }
 
 .nav-item {
@@ -340,6 +365,9 @@ onBeforeUnmount(() => clearInterval(timer));
     overflow-x: auto;
     flex: 1;
     justify-content: flex-end;
+  }
+  .nav-group-label {
+    display: none;
   }
   .nav-item {
     padding: 10px;

@@ -7,10 +7,22 @@ import AppModal from "./AppModal.vue";
 const props = defineProps({
   devices: { type: Array, default: () => [] },
   batchActive: { type: Boolean, default: false },
+  selectedIndex: { type: Number, default: 0 },
+  commandFeedback: { type: String, default: "" },
 });
-const emit = defineEmits(["command"]);
+const emit = defineEmits(["command", "update:selectedIndex"]);
 
-const selectedIdx = ref(0);
+// State perangkat terpilih diangkat ke Dashboard (v-model) agar kartu metrik,
+// sparkline, dan filter realtime memakai device yang sama (ticket 37).
+const selectedIdx = computed({
+  get: () => {
+    const max = Math.max(0, props.devices.length - 1);
+    return Math.min(props.selectedIndex, max);
+  },
+  set: (v) => emit("update:selectedIndex", v),
+});
+
+const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const showPicker = ref(false);
 const busy = ref(false);
 const note = ref("");
@@ -206,7 +218,7 @@ function selectDevice(idx) {
       >
         <span
           class="picker-dot"
-          :class="offlineSince(d.last_seen_at) < 45000 ? 'on' : 'off'"
+          :class="offlineSince(d.last_seen_at) < OFFLINE_MS ? 'on' : 'off'"
         ></span>
         {{ d.name }} <small class="muted">{{ d.mode || "IDLE" }}</small>
       </div>
@@ -243,6 +255,9 @@ function selectDevice(idx) {
       :class="note.includes('Gagal') ? 'note-err' : ''"
     >
       {{ note }}
+    </div>
+    <div v-if="commandFeedback" class="note note-feedback">
+      {{ commandFeedback }}
     </div>
   </div>
 
@@ -452,5 +467,9 @@ h2 {
 .note-err {
   color: var(--danger);
   background: var(--danger-soft);
+}
+.note-feedback {
+  color: var(--ok);
+  background: #e3f5ec;
 }
 </style>

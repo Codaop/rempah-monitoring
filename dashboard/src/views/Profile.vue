@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import AppShell from "../components/AppShell.vue";
+import DeviceManager from "../components/DeviceManager.vue";
 import { supabase } from "../lib/supabase";
 
 const router = useRouter();
@@ -143,134 +144,156 @@ async function signOut() {
 <template>
   <AppShell>
     <div class="page-head">
-      <h1 class="page-title">Pengaturan Profil</h1>
-      <p class="page-sub">Kelola detail akun dan akses operasional.</p>
+      <h1 class="page-title">Pengaturan</h1>
+      <p class="page-sub">Kelola profil Anda dan perangkat distilasi.</p>
     </div>
 
-    <!-- Profile card -->
-    <div class="card profile-card">
-      <div class="avatar-col">
-        <div class="avatar-circle">
-          <div class="avatar-media">
-            <img
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              alt="Foto profil"
-              class="avatar-img"
-            />
-            <svg
-              v-else
-              viewBox="0 0 100 100"
-              xmlns="http://www.w3.org/2000/svg"
-              width="80"
-              height="80"
+    <!-- ── Konfigurasi Profil ──────────────────────────────────────────── -->
+    <section class="settings-section">
+      <div class="section-head">
+        <h2 class="section-title">Konfigurasi Profil</h2>
+        <p class="section-sub">
+          Data diri, foto profil, dan akses operasional akun Anda.
+        </p>
+      </div>
+
+      <!-- Profile card -->
+      <div class="card profile-card">
+        <div class="avatar-col">
+          <div class="avatar-circle">
+            <div class="avatar-media">
+              <img
+                v-if="avatarUrl"
+                :src="avatarUrl"
+                alt="Foto profil"
+                class="avatar-img"
+              />
+              <svg
+                v-else
+                viewBox="0 0 100 100"
+                xmlns="http://www.w3.org/2000/svg"
+                width="80"
+                height="80"
+              >
+                <circle cx="50" cy="35" r="22" fill="#94a3b8" />
+                <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
+              </svg>
+            </div>
+            <button
+              type="button"
+              class="avatar-edit"
+              aria-label="Ubah foto profil"
+              title="Ubah foto profil"
+              :disabled="avatarBusy"
+              @click="pickAvatar"
             >
-              <circle cx="50" cy="35" r="22" fill="#94a3b8" />
-              <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
-            </svg>
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                stroke-width="2.5"
+                stroke-linecap="round"
+              >
+                <path
+                  d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                />
+                <path
+                  d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                />
+              </svg>
+            </button>
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              class="avatar-file"
+              @change="onFileChosen"
+            />
           </div>
-          <button
-            type="button"
-            class="avatar-edit"
-            aria-label="Ubah foto profil"
-            title="Ubah foto profil"
-            :disabled="avatarBusy"
-            @click="pickAvatar"
-          >
+          <span v-if="avatarMsg" class="avatar-msg">{{ avatarMsg }}</span>
+          <span class="role-badge">OPERATOR</span>
+          <span class="op-id">ID: {{ operatorId }}</span>
+        </div>
+
+        <form class="form-col" @submit.prevent="save">
+          <div class="field">
+            <label class="field-label">Nama Tampilan</label>
+            <input
+              v-model="displayName"
+              class="input"
+              type="text"
+              placeholder="Nama Anda"
+            />
+          </div>
+          <div class="field">
+            <label class="field-label">Alamat Email</label>
+            <input class="input" :value="emailVal" disabled />
+          </div>
+          <div class="field">
+            <label class="field-label"
+              >Telepon Kontak Darurat (Teknisi Ahli)</label
+            >
+            <input
+              v-model="phone"
+              class="input"
+              type="tel"
+              placeholder="+62 812 3456 7890"
+            />
+          </div>
+
+          <p v-if="saved" class="ok-msg">{{ saved }}</p>
+          <p v-if="error" class="err-msg">{{ error }}</p>
+
+          <div class="form-actions">
+            <button class="btn-save" type="submit" :disabled="saving">
+              {{ saving ? "Menyimpan…" : "Simpan Profil" }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Session card -->
+      <div class="card session-card">
+        <div class="session-body">
+          <div>
+            <h2 class="session-title">Manajemen Sesi</h2>
+            <p class="session-sub">
+              Akhiri sesi Anda dengan aman di semua terminal.
+            </p>
+          </div>
+          <button class="btn-logout" @click="signOut">
             <svg
-              width="11"
-              height="11"
+              width="15"
+              height="15"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="white"
-              stroke-width="2.5"
+              stroke="currentColor"
+              stroke-width="2"
               stroke-linecap="round"
             >
-              <path
-                d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
-              />
-              <path
-                d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
-              />
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
-          </button>
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            class="avatar-file"
-            @change="onFileChosen"
-          />
-        </div>
-        <span v-if="avatarMsg" class="avatar-msg">{{ avatarMsg }}</span>
-        <span class="role-badge">OPERATOR</span>
-        <span class="op-id">ID: {{ operatorId }}</span>
-      </div>
-
-      <form class="form-col" @submit.prevent="save">
-        <div class="field">
-          <label class="field-label">Nama Tampilan</label>
-          <input
-            v-model="displayName"
-            class="input"
-            type="text"
-            placeholder="Nama Anda"
-          />
-        </div>
-        <div class="field">
-          <label class="field-label">Alamat Email</label>
-          <input class="input" :value="emailVal" disabled />
-        </div>
-        <div class="field">
-          <label class="field-label"
-            >Telepon Kontak Darurat (Teknisi Ahli)</label
-          >
-          <input
-            v-model="phone"
-            class="input"
-            type="tel"
-            placeholder="+62 812 3456 7890"
-          />
-        </div>
-
-        <p v-if="saved" class="ok-msg">{{ saved }}</p>
-        <p v-if="error" class="err-msg">{{ error }}</p>
-
-        <div class="form-actions">
-          <button class="btn-save" type="submit" :disabled="saving">
-            {{ saving ? "Menyimpan…" : "Simpan Profil" }}
+            Keluar
           </button>
         </div>
-      </form>
-    </div>
-
-    <!-- Session card -->
-    <div class="card session-card">
-      <div class="session-body">
-        <div>
-          <h2 class="session-title">Manajemen Sesi</h2>
-          <p class="session-sub">
-            Akhiri sesi Anda dengan aman di semua terminal.
-          </p>
-        </div>
-        <button class="btn-logout" @click="signOut">
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-          >
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16 17 21 12 16 7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
-          Keluar
-        </button>
       </div>
-    </div>
+    </section>
+
+    <!-- ── Manajemen Perangkat ─────────────────────────────────────────── -->
+    <section class="settings-section">
+      <div class="section-head">
+        <h2 class="section-title">Manajemen Perangkat</h2>
+        <p class="section-sub">
+          Daftarkan dan kelola perangkat distilasi yang terhubung.
+        </p>
+      </div>
+
+      <DeviceManager />
+    </section>
   </AppShell>
 </template>
 
@@ -287,6 +310,25 @@ async function signOut() {
   font-size: 13px;
   color: var(--muted);
   margin: 4px 0 0;
+}
+
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.section-head {
+  margin-bottom: 14px;
+}
+.section-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 2px;
+}
+.section-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 0;
 }
 
 .profile-card {

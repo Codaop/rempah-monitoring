@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import AppShell from "../components/AppShell.vue";
 import { supabase } from "../lib/supabase";
-import { fmtNum, fmtDateTime, fmtTime } from "../lib/format";
+import { fmtNum, fmtDateTime, fmtTime, offlineSince } from "../lib/format";
 
 const search = ref("");
 const filter = ref("semua");
@@ -153,6 +153,26 @@ const estimatedYield = computed(
 const targetYield = computed(
   () => snapshot.value?.batch?.target_yield_l || null
 );
+
+// Status online/offline jujur dari last_seen_at per perangkat (threshold 60s,
+// konsisten dengan OFFLINE_AFTER_S bridge dan dashboard).
+const OFFLINE_MS = 60000;
+const anyDeviceOnline = computed(() =>
+  (snapshot.value?.devices || []).some(
+    (d) =>
+      offlineSince(d.last_seen_at) >= 0 &&
+      offlineSince(d.last_seen_at) < OFFLINE_MS
+  )
+);
+const latestSensorAge = computed(() => {
+  const ts = snapshot.value?.latest?.ts;
+  if (!ts) return null;
+  return Date.now() - new Date(ts).getTime();
+});
+const dataFlowing = computed(() => {
+  const age = latestSensorAge.value;
+  return age !== null && age >= 0 && age < OFFLINE_MS;
+});
 const yieldProgress = computed(() => {
   if (!estimatedYield.value || !targetYield.value) return 0;
   return Math.min(
@@ -336,7 +356,11 @@ onBeforeUnmount(() => clearInterval(timer));
       </div>
       <div class="status-badges">
         <span class="status-pill">
-          <span class="dot-ok"></span>Sensor Online
+          <span
+            class="dot-status"
+            :class="anyDeviceOnline ? 'dot-ok' : 'dot-off'"
+          ></span>
+          Perangkat {{ anyDeviceOnline ? "Online" : "Offline" }}
         </span>
         <span class="status-pill">
           <svg
@@ -353,7 +377,7 @@ onBeforeUnmount(() => clearInterval(timer));
             <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
             <line x1="12" y1="20" x2="12.01" y2="20" />
           </svg>
-          Terhubung
+          {{ dataFlowing ? "Data Mengalir" : "Menunggu Data" }}
         </span>
       </div>
     </div>
@@ -471,7 +495,7 @@ onBeforeUnmount(() => clearInterval(timer));
         </div>
       </div>
 
-      <!-- Right: Yield + Power status -->
+      <!-- Right: Hasil -->
       <div class="right-col">
         <div class="card yield-card">
           <div class="yield-header">
@@ -504,89 +528,6 @@ onBeforeUnmount(() => clearInterval(timer));
             </div>
           </div>
           <div class="yield-pct">{{ yieldProgress }}% dari target</div>
-        </div>
-
-        <div class="card power-status-card">
-          <h3 class="power-title">STATUS LISTRIK</h3>
-          <div class="power-rows">
-            <div class="power-row">
-              <span class="power-icon pi-main">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                >
-                  <rect x="2" y="7" width="20" height="14" rx="2" />
-                  <path d="M16 3h-8l-2 4h12l-2-4z" />
-                </svg>
-              </span>
-              <span class="power-name">Listrik Utama</span>
-              <span class="power-sep">:</span>
-              <span class="power-val">12,3 <small>volt</small></span>
-            </div>
-            <div class="power-row">
-              <span class="power-icon pi-sensor">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                >
-                  <path
-                    d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"
-                  />
-                </svg>
-              </span>
-              <span class="power-name">Sensor Suhu</span>
-              <span class="power-sep">:</span>
-              <span class="power-val">5,6 <small>volt</small></span>
-            </div>
-            <div class="power-row">
-              <span class="power-icon pi-gas">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                >
-                  <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
-                </svg>
-              </span>
-              <span class="power-name">Sensor Tekanan Gas</span>
-              <span class="power-sep">:</span>
-              <span class="power-val">5,1 <small>volt</small></span>
-            </div>
-            <div class="power-row">
-              <span class="power-icon pi-fire">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                >
-                  <path
-                    d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 3z"
-                  />
-                </svg>
-              </span>
-              <span class="power-name">Pemantik Api</span>
-              <span class="power-sep">:</span>
-              <span class="power-val">5,4 <small>volt</small></span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -718,6 +659,14 @@ onBeforeUnmount(() => clearInterval(timer));
   height: 8px;
   border-radius: 50%;
   background: var(--ok);
+}
+.dot-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dot-off {
+  background: var(--muted);
 }
 
 /* Top grid */
@@ -877,67 +826,7 @@ onBeforeUnmount(() => clearInterval(timer));
   text-align: right;
 }
 
-/* Power status card */
-.power-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  text-transform: uppercase;
-  margin-bottom: 12px;
-}
-.power-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.power-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13.5px;
-}
-.power-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 26px;
-}
-.pi-main {
-  background: #fef3c7;
-  color: #d69e2e;
-}
-.pi-sensor {
-  background: #e0f2fe;
-  color: #0284c7;
-}
-.pi-gas {
-  background: #e0f7f4;
-  color: #0d9488;
-}
-.pi-fire {
-  background: #fee2e2;
-  color: #e53e3e;
-}
-.power-name {
-  flex: 1;
-  color: var(--text);
-}
-.power-sep {
-  color: var(--muted);
-}
-.power-val {
-  font-weight: 600;
-  color: var(--navy);
-  min-width: 70px;
-  text-align: right;
-}
-.power-val small {
-  font-weight: 400;
-  color: var(--muted);
-}
+/* Power status card — dihapus bersama kartu STATUS LISTRIK */
 
 /* Log section */
 .log-card {

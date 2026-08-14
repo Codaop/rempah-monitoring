@@ -57,18 +57,20 @@ const busy = ref(false);
 const note = ref("");
 const session = ref(null);
 
-// Perangkat tersedia = online (< 45 dtk) DAN mode IDLE.
+// Perangkat tersedia = online (< 60 dtk, konsisten OFFLINE_AFTER_S) DAN mode IDLE.
+const OFFLINE_MS = 60000;
+
 function isAvailable(d) {
   if (!d || !d.mode || d.mode !== "IDLE") return false;
   const ms = offlineSince(d.last_seen_at);
-  return ms >= 0 && ms < 45000;
+  return ms >= 0 && ms < OFFLINE_MS;
 }
 
 function statusLabelOf(d) {
   if (!d) return "—";
   if (d.mode && d.mode !== "IDLE") return d.mode;
   const ms = offlineSince(d.last_seen_at);
-  if (ms < 0 || ms >= 45000) return "Offline";
+  if (ms < 0 || ms >= OFFLINE_MS) return "Offline";
   return "Tersedia";
 }
 

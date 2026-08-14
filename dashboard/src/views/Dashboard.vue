@@ -14,28 +14,48 @@ import PowerPanel from "../components/PowerPanel.vue";
 import BatchPanel from "../components/BatchPanel.vue";
 import NotificationLog from "../components/NotificationLog.vue";
 import { supabase } from "../lib/supabase";
-import { fmtNum, fmtTime, fmtDateTime } from "../lib/format";
+import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
 const REFRESH_MS = 30000;
+const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const route = useRoute();
 const batchPanel = ref(null);
 
 const devices = ref([]);
 const batch = ref(null);
 const batchLog = ref(null);
-const history = ref([]);
+const history = ref([]); // semua telemetry (multi-device)
 const alerts = ref([]);
 const refreshPrompt = ref("");
 const loading = ref(true);
-const lastSync = ref(null);
+const selectedIdx = ref(0);
+const commandFeedback = ref("");
+const commandStatusCache = new Map(); // command_id → status terakhir (dedupe)
 
-const activeDeviceId = computed(() => devices.value[0]?.id || null);
-const latest = computed(() => history.value[history.value.length - 1] || {});
-const sparkTemp = computed(() => history.value.map((r) => r.boiler_temp_c));
-const sparkGas = computed(() => history.value.map((r) => r.gas_pressure_kpa));
-const sparkWater = computed(() => history.value.map((r) => r.water_level));
+const selectedDevice = computed(() => devices.value[selectedIdx.value] || null);
+const activeDeviceId = computed(() => selectedDevice.value?.id || null);
+
+// Riwayat & metrik mengikuti perangkat terpilih (ticket 37) — setiap still
+// menampilkan datanya sendiri tanpa tercampur device lain.
+const deviceHistory = computed(() =>
+  activeDeviceId.value
+    ? history.value.filter((r) => r.device_id === activeDeviceId.value)
+    : []
+);
+const latest = computed(
+  () => deviceHistory.value[deviceHistory.value.length - 1] || {}
+);
+const sparkTemp = computed(() =>
+  deviceHistory.value.map((r) => r.boiler_temp_c)
+);
+const sparkGas = computed(() =>
+  deviceHistory.value.map((r) => r.gas_pressure_kpa)
+);
+const sparkWater = computed(() =>
+  deviceHistory.value.map((r) => r.water_level)
+);
 const sparkYield = computed(() =>
-  batchLog.value ? [batchLog.value.estimated_yield || 0] : [0]
+  batchLog.value && batch.value ? [batchLog.value.estimated_yield || 0] : [0]
 );
 
 const greeting = computed(() => {
@@ -46,14 +66,28 @@ const greeting = computed(() => {
   return "Selamat Malam";
 });
 
-const statusSubtitle = computed(() => {
-  if (batch.value) return `Status sistem optimal. Batch aktif sedang berjalan.`;
-  return "Tidak ada batch aktif saat ini.";
+// Status online/offline jujur dari devices.last_seen_at (bukan lastSync).
+const sensorOnline = computed(() => {
+  const d = selectedDevice.value;
+  if (!d) return false;
+  const ms = offlineSince(d.last_seen_at);
+  return ms >= 0 && ms < OFFLINE_MS;
 });
 
-const sensorOnline = computed(() => {
-  if (!lastSync.value) return false;
-  return Date.now() - lastSync.value.getTime() < 120000;
+// "Terhubung" benar-benar berarti data mengalir: telemetry terakhir perangkat
+// terpilih masih segar (< OFFLINE_MS).
+const dataFlowing = computed(() => {
+  const ts = latest.value?.ts;
+  if (!ts) return false;
+  const age = Date.now() - new Date(ts).getTime();
+  return age >= 0 && age < OFFLINE_MS;
+});
+
+const statusSubtitle = computed(() => {
+  if (batch.value) return `Status sistem optimal. Batch aktif sedang berjalan.`;
+  if (dataFlowing.value)
+    return "Tidak ada batch aktif. Nilai di bawah real-time dari perangkat.";
+  return "Tidak ada batch aktif saat ini.";
 });
 
 function pushAlert(level, tag, message, at) {
@@ -84,11 +118,21 @@ function checkThresholds(row) {
     );
 }
 
+function commandStatusLabel(status) {
+  if (status === "succeeded") return "Sukses";
+  if (status === "failed") return "Gagal";
+  if (status === "rejected") return "Ditolak";
+  if (status === "dispatched") return "Dikirim ke perangkat";
+  return null; // pending / lain-lain — tidak perlu notifikasi
+}
+
 async function loadAll() {
   const [devRes, stateRes, batchRes, logRes, histRes] = await Promise.all([
     supabase
       .from("devices")
-      .select("id, producer_id, name, mqtt_username, last_seen_at"),
+      .select(
+        "id, producer_id, name, mqtt_username, last_seen_at, first_seen_at"
+      ),
     supabase
       .from("device_state")
       .select("device_id, producer_id, mode, updated_at"),
@@ -98,7 +142,11 @@ async function loadAll() {
       .eq("status", "active")
       .order("started_at", { ascending: false })
       .limit(1),
-    supabase.from("batch_logs").select("*").limit(1),
+    supabase
+      .from("batch_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1),
     supabase
       .from("sensor_logs")
       .select("*")
@@ -113,9 +161,19 @@ async function loadAll() {
   }));
 
   batch.value = batchRes.data?.[0] || null;
-  batchLog.value = logRes.data?.[0] || null;
+  // batch_logs hanya relevan saat batch aktif (ticket 35: metrik idle datang
+  // langsung dari telemetry, bukan dari batch).
+  if (batch.value) {
+    const { data: bl } = await supabase
+      .from("batch_logs")
+      .select("*")
+      .eq("batch_id", batch.value.id)
+      .maybeSingle();
+    batchLog.value = bl || null;
+  } else {
+    batchLog.value = null;
+  }
   history.value = (histRes.data || []).reverse();
-  lastSync.value = new Date();
   loading.value = false;
 
   const hasState = alerts.value.length === 0;
@@ -186,6 +244,38 @@ onMounted(async () => {
         );
       }
     )
+    // Handshake koneksi pertama (ticket 41): first_seen_at baru terisi →
+    // provisioning berhasil end-to-end, beri tahu operator sekali saja.
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "devices" },
+      (payload) => {
+        const d = devices.value.find((x) => x.id === payload.new.id);
+        if (d) d.first_seen_at = payload.new.first_seen_at || d.first_seen_at;
+        if (payload.new.first_seen_at && !payload.old?.first_seen_at) {
+          const name = d ? d.name : payload.new.id.slice(0, 8);
+          pushAlert(
+            "info",
+            "PROVISION",
+            `Perangkat ${name} terhubung pertama kali — provisioning berhasil.`
+          );
+        }
+      }
+    )
+    // Pesan dari device tak dikenal (ticket 43): konfigurasi firmware salah
+    // atau device liar — tampilkan agar cepat ketahuan, bukan di-drop diam-diam.
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "unknown_messages" },
+      (payload) => {
+        const u = payload.new;
+        pushAlert(
+          "warn",
+          "UNKNOWN",
+          `Pesan dari device tak dikenal ${String(u.device_id).slice(0, 8)} — cek konfigurasi firmware.`
+        );
+      }
+    )
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "commands" },
@@ -198,6 +288,31 @@ onMounted(async () => {
           "CMD",
           `Perintah ${c.action} untuk ${name}`
         );
+      }
+    )
+    // Feedback eksekusi command (ticket 32): status berubah → notifikasi +
+    // catatan di PowerPanel, tanpa duplikasi.
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "commands" },
+      (payload) => {
+        const c = payload.new;
+        const label = commandStatusLabel(c.status);
+        if (!label) return;
+        if (commandStatusCache.get(c.id) === c.status) return; // dedupe
+        commandStatusCache.set(c.id, c.status);
+        const d = devices.value.find((x) => x.id === c.device_id);
+        const name = d ? d.name : c.device_id.slice(0, 8);
+        const level =
+          c.status === "failed" || c.status === "rejected" ? "warn" : "info";
+        pushAlert(
+          level,
+          "CMD",
+          `Perintah ${c.action} untuk ${name}: ${label}.`
+        );
+        if (activeDeviceId.value === c.device_id) {
+          commandFeedback.value = `Perintah ${c.action}: ${label}.`;
+        }
       }
     )
     .on(
@@ -220,6 +335,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(pollTimer);
   realtime && supabase.removeChannel(realtime);
+});
+
+// Jaga selectedIdx tetap valid saat daftar device berubah (ticket 37).
+watch(devices, (list) => {
+  if (selectedIdx.value >= list.length)
+    selectedIdx.value = Math.max(0, list.length - 1);
 });
 
 function onCommand({ device, action, mismatch }) {
@@ -268,7 +389,8 @@ async function refreshState() {
             class="dot-status"
             :class="sensorOnline ? 'dot-ok' : 'dot-off'"
           ></span>
-          Sensor {{ sensorOnline ? "Online" : "Offline" }}
+          {{ selectedDevice ? selectedDevice.name : "Perangkat" }}
+          {{ sensorOnline ? "Online" : "Offline" }}
         </span>
         <span class="status-pill">
           <svg
@@ -285,7 +407,7 @@ async function refreshState() {
             <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
             <line x1="12" y1="20" x2="12.01" y2="20" />
           </svg>
-          Terhubung
+          {{ dataFlowing ? "Terhubung" : "Menunggu Data" }}
         </span>
       </div>
     </div>
@@ -301,6 +423,12 @@ async function refreshState() {
     <div v-if="loading" class="muted load-msg">Memuat data…</div>
 
     <template v-else>
+      <!-- Indikator nilai real-time saat idle (ticket 35) -->
+      <div v-if="!batch && dataFlowing" class="idle-live-hint">
+        <span class="dot-status dot-ok"></span>
+        Nilai real-time dari perangkat — belum ada batch aktif.
+      </div>
+
       <!-- 4 Metric Cards -->
       <div class="grid-cards">
         <MetricCard
@@ -374,7 +502,7 @@ async function refreshState() {
 
         <MetricCard
           label="PERKIRAAN HASIL"
-          :value="fmtNum(batchLog?.estimated_yield)"
+          :value="batch ? fmtNum(batchLog?.estimated_yield) : '—'"
           unit="L"
           :data="sparkYield"
           color="#a07840"
@@ -401,6 +529,9 @@ async function refreshState() {
         <PowerPanel
           :devices="devices"
           :batch-active="!!batch"
+          :selected-index="selectedIdx"
+          :command-feedback="commandFeedback"
+          @update:selected-index="selectedIdx = $event"
           @command="onCommand"
         />
         <BatchPanel
@@ -472,6 +603,19 @@ async function refreshState() {
 }
 .dot-off {
   background: var(--muted);
+}
+
+.idle-live-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 999px;
+  padding: 6px 14px;
+  margin-bottom: 14px;
 }
 
 .refresh-prompt {
