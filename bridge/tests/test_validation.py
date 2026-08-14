@@ -15,9 +15,15 @@ class FakeMqtt:
 
 
 class FakeDb:
-    def __init__(self, state: DeviceState, last_seen: dict | None = None) -> None:
+    def __init__(
+        self,
+        state: DeviceState,
+        last_seen: dict | None = None,
+        known_devices: list[str] | None = None,
+    ) -> None:
         self.state = state
         self.last_seen: dict[str, float] = last_seen or {}
+        self.known_devices = set(known_devices) if known_devices is not None else {"d1"}
         self.offline_flags: List[Tuple[str, bool]] = []
         self.status_updates: List[Tuple[str, str]] = []
         self.telemetry: List[dict] = []
@@ -26,6 +32,8 @@ class FakeDb:
         self.estimates: List[dict] = []
         self.batch_opens: List[Tuple[str, str]] = []
         self.batch_closes: List[Tuple[str, str]] = []
+        self.first_contacts: List[Tuple[str, str]] = []
+        self.unknown_messages: List[dict] = []
 
     def device_state(self, device_id: str) -> DeviceState:
         return self.state
@@ -45,6 +53,17 @@ class FakeDb:
 
     def set_last_seen(self, device_id: str, ts: float) -> None:
         self.last_seen[device_id] = ts
+
+    def note_first_contact(self, device_id: str, ts: str) -> None:
+        self.first_contacts.append((device_id, ts))
+
+    def is_known_device(self, device_id: str) -> bool:
+        return device_id in self.known_devices
+
+    def record_unknown_message(self, device_id: str, topic: str, payload: dict) -> None:
+        self.unknown_messages.append(
+            {"device_id": device_id, "topic": topic, "payload": payload}
+        )
 
     def get_last_seen(self, device_id: str) -> Optional[float]:
         return self.last_seen.get(device_id)
@@ -341,3 +360,76 @@ def test_draining_is_neither_heating_nor_terminal(mqtt: FakeMqtt) -> None:
 
     assert db.batch_opens == []
     assert db.batch_closes == []
+
+
+def test_telemetry_records_first_contact(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "ts": "2026-08-11T10:00:00Z",
+        "boiler_temp_c": 95.0,
+        "gas_pressure_kpa": 2.8,
+        "water_level": "OK",
+        "drip_count": 0,
+        "flame_lit": True,
+    }
+
+    bridge.handle_telemetry("d1", payload)
+
+    assert db.first_contacts == [("d1", "2026-08-11T10:00:00Z")]
+
+
+def test_state_records_first_contact(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "d1",
+        "mode": "DISTILLING",
+        "cause": "detected",
+        "ts": "2026-08-11T10:05:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.first_contacts == [("d1", "2026-08-11T10:05:00Z")]
+
+
+def test_telemetry_from_unknown_device_is_recorded_not_persisted(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "ts": "2026-08-11T10:00:00Z",
+        "boiler_temp_c": 95.0,
+        "gas_pressure_kpa": 2.8,
+        "water_level": "OK",
+        "drip_count": 0,
+        "flame_lit": True,
+    }
+
+    bridge.handle_telemetry("ghost", payload)
+
+    assert db.unknown_messages == [
+        {"device_id": "ghost", "topic": "rempah/ghost/telemetry", "payload": payload}
+    ]
+    assert db.telemetry == []
+    assert db.last_seen == {}
+    assert db.first_contacts == []
+
+
+def test_state_from_unknown_device_is_recorded_not_applied(mqtt: FakeMqtt) -> None:
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    payload = {
+        "device_id": "ghost",
+        "mode": "DISTILLING",
+        "cause": "detected",
+        "ts": "2026-08-11T10:05:00Z",
+    }
+
+    bridge.handle_state(payload)
+
+    assert db.unknown_messages == [
+        {"device_id": "ghost", "topic": "rempah/ghost/state", "payload": payload}
+    ]
+    assert db.state_updates == []
+    assert db.first_contacts == []

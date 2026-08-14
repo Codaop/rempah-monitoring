@@ -29,13 +29,13 @@ class SupabaseDbAdapter:
     # ── Telemetry ────────────────────────────────────────────────────────────
 
     def insert_telemetry(self, device_id: str, payload: dict) -> None:
+        # Telemetry selalu disimpan — dengan batch_id NULL saat tidak ada batch
+        # aktif (ticket 33) agar dashboard bisa menampilkan nilai real-time
+        # perangkat di luar batch (cek kesiapan, monitoring pasif).
         batch = self._active_batch(device_id)
-        if batch is None:
-            logger.debug("No active batch for device %s; skipping telemetry insert", device_id)
-            return
         producer_id = self._resolve_producer(device_id)
         row = {
-            "batch_id": batch["id"],
+            "batch_id": batch["id"] if batch else None,
             "device_id": device_id,
             "producer_id": producer_id,
             **payload,
@@ -90,9 +90,67 @@ class SupabaseDbAdapter:
         # This method intentionally a no-op — set_last_seen carries the information.
         pass
 
+    def note_first_contact(self, device_id: str, ts: str) -> None:
+        """Handshake koneksi pertama (ticket 41): catat first_seen_at sekali.
+
+        Dipanggil saat telemetry/state pertama dari sebuah device. Jika
+        first_seen_at belum terisi, tulis timestamp ini dan buat alert
+        "perangkat terhubung pertama kali" — penanda provisioning berhasil.
+        Reconnect tidak menimpa nilai yang sudah ada.
+        """
+        try:
+            resp = (
+                self._client.table("devices")
+                .select("first_seen_at, name")
+                .eq("id", device_id)
+                .maybe_single()
+                .execute()
+            )
+            if not resp.data or resp.data.get("first_seen_at"):
+                return
+            self._client.table("devices").update(
+                {"first_seen_at": ts}
+            ).eq("id", device_id).execute()
+            name = resp.data.get("name") or device_id[:8]
+            producer_id = self._resolve_producer(device_id)
+            self._client.table("alerts").insert(
+                {
+                    "device_id": device_id,
+                    "producer_id": producer_id,
+                    "kind": "device_first_seen",
+                    "value": 0.0,
+                    "ts": ts,
+                }
+            ).execute()
+            logger.info("first contact recorded for device %s (%s)", device_id[:8], name)
+        except Exception as exc:
+            logger.warning("note_first_contact failed for %s: %s", device_id, exc)
+
     def list_devices(self) -> list[str]:
         resp = self._client.table("devices").select("id").execute()
         return [r["id"] for r in (resp.data or [])]
+
+    def is_known_device(self, device_id: str) -> bool:
+        return self._resolve_producer(device_id) is not None
+
+    def record_unknown_message(self, device_id: str, topic: str, payload: dict) -> None:
+        """Catat pesan dari device_id yang tidak terdaftar (ticket 43).
+
+        Tabel `alerts` tidak bisa dipakai (FK device_id NOT NULL ke devices),
+        jadi kejadian disimpan di `unknown_messages` agar operator bisa
+        mendiagnosis device liar / salah konfigurasi dari dashboard.
+        """
+        try:
+            self._client.table("unknown_messages").insert(
+                {
+                    "device_id": device_id,
+                    "topic": topic,
+                    "payload": payload,
+                }
+            ).execute()
+            logger.warning("Unknown device %s published to %s — recorded", device_id[:8], topic)
+        except Exception as exc:
+            logger.warning("record_unknown_message failed: %s", exc)
 
     # ── Commands ─────────────────────────────────────────────────────────────
 
@@ -246,6 +304,18 @@ class SupabaseDbAdapter:
             if batch_ids:
                 self._client.table("sensor_logs").delete().in_("batch_id", batch_ids).execute()
                 logger.info("Purged sensor_logs for %d closed batches before %s", len(batch_ids), cutoff)
+            # Baris idle (batch_id NULL) yang berumur >7 hari ikut dibersihkan
+            # (ticket 27) — didukung partial index sensor_logs_idle_ts_idx.
+            idle = (
+                self._client.table("sensor_logs")
+                .delete()
+                .is_("batch_id", None)
+                .lt("ts", cutoff)
+                .execute()
+            )
+            idle_count = len(idle.data or [])
+            if idle_count:
+                logger.info("Purged %d idle sensor_logs rows before %s", idle_count, cutoff)
         except Exception as exc:
             logger.warning("purge_old_sensor_logs failed: %s", exc)
 

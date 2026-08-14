@@ -53,9 +53,17 @@ class Bridge:
         self.db.mark_command(command.id, "dispatched")
 
     def handle_telemetry(self, device_id: str, payload: dict) -> None:
+        # Ticket 43: pesan dari device yang tidak terdaftar dicatat (bukan drop
+        # diam-diam) — kesalahan konfigurasi firmware cepat ketahuan.
+        if not self.db.is_known_device(device_id):
+            self.db.record_unknown_message(
+                device_id, f"{self.topic_root}/{device_id}/telemetry", payload
+            )
+            return
         self.db.insert_telemetry(device_id, payload)
         self.db.set_last_seen(device_id, self.clock())
         self.db.set_offline(device_id, False)
+        self.db.note_first_contact(device_id, payload.get("ts") or "")
         temp = payload.get("boiler_temp_c")
         if temp is not None and temp > self.over_temp_threshold_c:
             self.db.insert_alert(device_id, "over_temperature", temp, payload.get("ts"))
@@ -67,10 +75,17 @@ class Bridge:
 
     def handle_state(self, payload: dict) -> None:
         device_id = payload["device_id"]
+        # Ticket 43: device tak dikenal dicatat, state-nya tidak diterapkan.
+        if not self.db.is_known_device(device_id):
+            self.db.record_unknown_message(
+                device_id, f"{self.topic_root}/{device_id}/state", payload
+            )
+            return
         mode = payload["mode"]
         ts = payload["ts"]
         previous = self.db.device_state(device_id)  # read before overwriting
         self.db.set_device_state(device_id, mode, ts)
+        self.db.note_first_contact(device_id, ts)
         cause = payload.get("cause", "")
         if cause.startswith("command_executed:"):
             self.db.mark_command(cause.split(":", 1)[1], "succeeded")
