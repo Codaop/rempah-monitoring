@@ -19,6 +19,7 @@ Usage (HiveMQ Cloud, TLS port 8883):
 import json
 import math
 import os
+import random
 from pathlib import Path
 import ssl
 import threading
@@ -53,13 +54,22 @@ def _ts() -> str:
 def telemetry_payload() -> dict:
     t = time.time()
     mins = (t - T0) / 60.0
+    # Fluktuasi kecil (noise sensor) ditambahkan agar sparkline terlihat hidup
+    # saat demo, tanpa mengubah tren fisik: massa turun perlahan, level air
+    # turun perlahan, suhu boiler berosilasi di sekitar titik didih.
     return {
         "ts": _ts(),
-        "boiler_temp_c": round(94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7), 2),
+        "boiler_temp_c": round(
+            94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7) + random.uniform(-0.1, 0.1), 2
+        ),
         # Sensor beban (load cell): massa tabung LPG menurun seiring konsumsi.
         # Asumsi tabung 15 kg + tare ~14 kg (total ~29 kg saat penuh).
-        "gas_mass_kg": round(28.6 - 0.01 * mins, 2),
-        "water_level": round(max(40.0, 66.0 - 0.02 * mins), 2),
+        "gas_mass_kg": round(
+            28.6 - 0.01 * mins + 0.05 * math.sin(t / 20) + random.uniform(-0.03, 0.03), 2
+        ),
+        "water_level": round(
+            max(40.0, 66.0 - 0.02 * mins + 0.4 * math.sin(t / 25) + random.uniform(-0.2, 0.2)), 2
+        ),
         "drip_count": max(1, int(6 + 4 * math.sin(t / 30))),
         "flame_lit": True,
     }

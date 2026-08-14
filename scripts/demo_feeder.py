@@ -10,6 +10,7 @@ Replaces the real ESP32->MQTT->Bridge path for local/visual demos.
 import json
 import math
 import os
+import random
 import socket
 import sys
 import time
@@ -63,14 +64,22 @@ def request(method: str, path: str, body: dict | None = None) -> None:
 def telemetry() -> list[dict]:
     t = time.time()
     mins = (t - T0) / 60.0
+    # Fluktuasi kecil (noise sensor) agar sparkline terlihat hidup saat demo,
+    # tanpa mengubah tren fisik: massa turun perlahan, level air turun perlahan.
     return [
         {
             "producer_id": PRODUCER_ID,
             "device_id": DEVICE_1,
             "batch_id": BATCH_ID,
-            "boiler_temp_c": round(94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7), 2),
-            "gas_mass_kg": round(28.6 - 0.01 * mins, 2),
-            "water_level": round(max(40.0, 66.0 - 0.02 * mins), 2),
+            "boiler_temp_c": round(
+                94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7) + random.uniform(-0.1, 0.1), 2
+            ),
+            "gas_mass_kg": round(
+                28.6 - 0.01 * mins + 0.05 * math.sin(t / 20) + random.uniform(-0.03, 0.03), 2
+            ),
+            "water_level": round(
+                max(40.0, 66.0 - 0.02 * mins + 0.4 * math.sin(t / 25) + random.uniform(-0.2, 0.2)), 2
+            ),
             "drip_count": max(1, int(6 + 4 * math.sin(t / 30))),
             "flame_lit": True,
         },
@@ -78,9 +87,11 @@ def telemetry() -> list[dict]:
             "producer_id": PRODUCER_ID,
             "device_id": DEVICE_2,
             "batch_id": None,
-            "boiler_temp_c": round(30 + 1.2 * math.sin(t / 60), 2),
-            "gas_mass_kg": round(28.9 - 0.005 * mins, 2),
-            "water_level": 70.0,
+            "boiler_temp_c": round(30 + 1.2 * math.sin(t / 60) + random.uniform(-0.2, 0.2), 2),
+            "gas_mass_kg": round(
+                28.9 - 0.005 * mins + 0.04 * math.sin(t / 22) + random.uniform(-0.02, 0.02), 2
+            ),
+            "water_level": round(70.0 + 0.3 * math.sin(t / 28) + random.uniform(-0.2, 0.2), 2),
             "drip_count": 0,
             "flame_lit": False,
         },
