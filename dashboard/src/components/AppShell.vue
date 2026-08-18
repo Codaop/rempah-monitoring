@@ -64,39 +64,10 @@ onBeforeUnmount(() => clearInterval(timer));
     <aside class="side">
       <div class="brand">
         <div class="logo-box">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            width="22"
-            height="22"
-          >
-            <path
-              d="M12 21C12 21 5 15 5 9a7 7 0 0 1 14 0c0 6-7 12-7 12z"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M12 7v12"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linecap="round"
-            />
-            <path
-              d="M9 10c0-1.5 1.2-3 3-3s3 1.5 3 3"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              fill="none"
-            />
-            <circle cx="12" cy="15" r="1.4" fill="white" opacity="0.85" />
-            <circle cx="10" cy="12" r="0.9" fill="white" opacity="0.65" />
-            <circle cx="14" cy="12" r="0.9" fill="white" opacity="0.65" />
-          </svg>
+          <img src="/logo.svg" alt="REMPAH" class="logo-img" />
         </div>
         <div>
-          <div class="brand-name">REM-PAH</div>
+          <div class="brand-name">REMPAH</div>
           <div class="brand-sub">Kontrol Distilasi</div>
         </div>
       </div>
@@ -230,6 +201,12 @@ onBeforeUnmount(() => clearInterval(timer));
   display: grid;
   place-items: center;
   flex: 0 0 40px;
+}
+
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .brand-name {

@@ -34,38 +34,9 @@ async function submit() {
     <form class="auth-card card" @submit.prevent="submit">
       <div class="auth-logo">
         <div class="logo-circle">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            width="32"
-            height="32"
-          >
-            <path
-              d="M12 21C12 21 5 15 5 9a7 7 0 0 1 14 0c0 6-7 12-7 12z"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M12 7v12"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linecap="round"
-            />
-            <path
-              d="M9 10c0-1.5 1.2-3 3-3s3 1.5 3 3"
-              stroke="white"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              fill="none"
-            />
-            <circle cx="12" cy="15" r="1.4" fill="white" opacity="0.85" />
-            <circle cx="10" cy="12" r="0.9" fill="white" opacity="0.65" />
-            <circle cx="14" cy="12" r="0.9" fill="white" opacity="0.65" />
-          </svg>
+          <img src="/logo.svg" alt="REMPAH" class="logo-img" />
         </div>
-        <h1 class="brand-title">REM-PAH</h1>
+        <h1 class="brand-title">REMPAH</h1>
         <p class="brand-sub">Sistem Kontrol Distilasi</p>
       </div>
 
@@ -189,6 +160,12 @@ async function submit() {
   display: grid;
   place-items: center;
   margin-bottom: 4px;
+}
+
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .brand-title {
