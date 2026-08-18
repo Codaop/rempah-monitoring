@@ -34,7 +34,7 @@ async function submit() {
     <form class="auth-card card" @submit.prevent="submit">
       <div class="auth-logo">
         <div class="logo-circle">
-          <img src="/logo.svg" alt="REMPAH" class="logo-img" />
+          <img src="/logo.png" alt="REMPAH" class="logo-img" />
         </div>
         <h1 class="brand-title">REMPAH</h1>
         <p class="brand-sub">Sistem Kontrol Distilasi</p>
