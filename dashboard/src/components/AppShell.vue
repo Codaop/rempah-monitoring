@@ -64,7 +64,7 @@ onBeforeUnmount(() => clearInterval(timer));
     <aside class="side">
       <div class="brand">
         <div class="logo-box">
-          <img src="/logo.png" alt="REMPAH" class="logo-img" />
+          <img src="/logo.svg" alt="REMPAH" class="logo-img" />
         </div>
         <div>
           <div class="brand-name">REMPAH</div>
@@ -201,6 +201,7 @@ onBeforeUnmount(() => clearInterval(timer));
   display: grid;
   place-items: center;
   flex: 0 0 40px;
+  overflow: hidden;
 }
 
 .logo-img {
