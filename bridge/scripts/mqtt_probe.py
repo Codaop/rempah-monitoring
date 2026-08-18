@@ -58,7 +58,7 @@ def on_message(client, userdata, msg) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="MQTT topic probe untuk REM-PAH")
+    ap = argparse.ArgumentParser(description="MQTT topic probe untuk REMPAH")
     ap.add_argument("--watch", action="store_true", help="subscribe terus-menerus (default: bounded window)")
     ap.add_argument("--seconds", type=int, default=15, help="durasi listen dalam mode bounded")
     ap.add_argument("--topic", default=TOPIC, help=f"topic filter MQTT (default: {TOPIC!r}, bisa dari env MQTT_PROBE_TOPIC)")

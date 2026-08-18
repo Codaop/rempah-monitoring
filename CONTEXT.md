@@ -1,4 +1,4 @@
-# REM-PAH
+# REMPAH
 
 IoT-integrated cardamom distillation system with PID temperature control for essential oil yield improvement.
 

@@ -37,7 +37,7 @@ def on_connect(client, userdata, flags, reason_code, properties=None) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="MQTT test publisher untuk REM-PAH")
+    ap = argparse.ArgumentParser(description="MQTT test publisher untuk REMPAH")
     ap.add_argument("--topic", required=True, help="topic tujuan")
     ap.add_argument("--message", required=True, help="payload (boleh JSON/teks)")
     ap.add_argument("--retain", action="store_true", help="set retain flag (probe langsung menerimanya saat subscribe)")

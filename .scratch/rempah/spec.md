@@ -1,10 +1,10 @@
-# REM-PAH — IoT Cardamom Distillation Monitoring & Control
+# REMPAH — IoT Cardamom Distillation Monitoring & Control
 
 Status: ready-for-agent
 
 ## Problem Statement
 
-Running an LPG-fired cardamom distillation still on a farm today means watching the boiler in person — guessing when the temperature is right, when the flame dies, when the boiler runs dry, and when the run is done. REM-PAH replaces this with an IoT system: a single ESP32 unit senses boiler temperature, gas pressure, water level, condensate drip rate, and flame presence, while an operator watches a live, mobile-friendly web dashboard and sends commands (start, stop, refill, cooling, emergency stop) from anywhere. The system must keep operator intent and physical reality in sync — commands must never act on stale device state — and it must scale to multiple machines and concurrent sessions without architectural change.
+Running an LPG-fired cardamom distillation still on a farm today means watching the boiler in person — guessing when the temperature is right, when the flame dies, when the boiler runs dry, and when the run is done. REMPAH replaces this with an IoT system: a single ESP32 unit senses boiler temperature, gas pressure, water level, condensate drip rate, and flame presence, while an operator watches a live, mobile-friendly web dashboard and sends commands (start, stop, refill, cooling, emergency stop) from anywhere. The system must keep operator intent and physical reality in sync — commands must never act on stale device state — and it must scale to multiple machines and concurrent sessions without architectural change.
 
 ## Solution
 

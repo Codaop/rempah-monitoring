@@ -1,4 +1,4 @@
-"""REM-PAH Bridge — entry point (python -m rempah_bridge).
+"""REMPAH Bridge — entry point (python -m rempah_bridge).
 
 Three background threads run alongside the MQTT loop:
   cmd-poll      polls Supabase for pending commands every COMMAND_POLL_S seconds

@@ -5,7 +5,7 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!url || !anonKey) {
   console.error(
-    "[REM-PAH] ⚠ Konfigurasi Supabase tidak ditemukan.\n" +
+    "[REMPAH] ⚠ Konfigurasi Supabase tidak ditemukan.\n" +
       "Buat file dashboard/.env dengan isi:\n" +
       "  VITE_SUPABASE_URL=https://<ref>.supabase.co\n" +
       "  VITE_SUPABASE_ANON_KEY=<anon-key>\n" +

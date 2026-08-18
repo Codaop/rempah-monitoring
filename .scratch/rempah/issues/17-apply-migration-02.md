@@ -1,6 +1,6 @@
 # 17 — Apply migration 02 ke Supabase
 
-**What to build:** Migration `scripts/migrations/02_alerts_and_batch_logs_constraint.sql` (tabel `alerts` + unique index `batch_logs(batch_id)` + index `sensor_logs(batch_id)`) belum diterapkan ke project Supabase REM-PAH. Tanpa ini, Bridge gagal menulis alert over-temperature dan upsert estimasi ke `batch_logs` (`on_conflict="batch_id"` butuh constraint unik).
+**What to build:** Migration `scripts/migrations/02_alerts_and_batch_logs_constraint.sql` (tabel `alerts` + unique index `batch_logs(batch_id)` + index `sensor_logs(batch_id)`) belum diterapkan ke project Supabase REMPAH. Tanpa ini, Bridge gagal menulis alert over-temperature dan upsert estimasi ke `batch_logs` (`on_conflict="batch_id"` butuh constraint unik).
 
 **Blocked by:** None — can start immediately
 

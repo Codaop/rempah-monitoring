@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo telemetry feeder for REM-PAH.
+"""Demo telemetry feeder for REMPAH.
 
 Pushes a realistic telemetry row for each demo device every 5 seconds and
 keeps device_state / devices.last_seen_at fresh. Uses the service-role key

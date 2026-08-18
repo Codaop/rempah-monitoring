@@ -299,7 +299,7 @@ function openReport(print) {
   if (!w) return;
   const batchId = `#${b.id.slice(0, 8).toUpperCase()}`;
   w.document
-    .write(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REM-PAH</title>
+    .write(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
 <style>
   body{font-family:system-ui,Segoe UI,sans-serif;color:#1c2b3a;padding:32px;}
   h1{font-size:22px;margin:0 0 4px;} .sub{color:#64748b;margin-bottom:20px;font-size:13px;}
@@ -310,7 +310,7 @@ function openReport(print) {
   .tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;background:#1c2b3a;color:#fff;}
   @media print{body{padding:16px;}}
 </style></head><body>
-  <h1>REM-PAH — Laporan Batch</h1>
+  <h1>REMPAH — Laporan Batch</h1>
   <div class="sub">${batchId} — ${deviceNameOf(b.device_id)} · Dibuat: ${fmtDateTime(new Date())} · Status: ${b.status.toUpperCase()}</div>
   <h2>Identitas &amp; Ringkasan</h2>
   <table>

@@ -1,4 +1,4 @@
-# Ops Runbook — REM-PAH
+# Ops Runbook — REMPAH
 
 Cara menjalankan komponen dari sesi development saat ini. Teknis dalam bahasa
 Inggris; penjelasan dalam Bahasa Indonesia.
@@ -292,7 +292,7 @@ powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLi
 powershell -Command "Stop-Process -Id <PID> -Force"
 ```
 
-## 4. Database (Supabase, project REM-PAH)
+## 4. Database (Supabase, project REMPAH)
 
 - Schema + RLS: migration `rempah_schema_and_rls` (ticket 01 — done).
 - Realtime aktif: `sensor_logs`, `device_state`, `batches`, `commands`, plus
