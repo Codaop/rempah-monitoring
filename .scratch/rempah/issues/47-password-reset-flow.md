@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** done — email reset terkirim; SMTP Mailtrap (opsional) menunggu konfigurasi user
+**Status:** done — email reset terkirim; SMTP Resend (opsional) menunggu konfigurasi user
 
 - [x] Link dari email reset membuka halaman "Atur Password Baru", bukan halaman dashboard
 - [x] Sesi recovery (event `PASSWORD_RECOVERY`) ditangani dengan benar oleh halaman tersebut
@@ -17,4 +17,5 @@
 
 - 2026-08-19: Dibuat dari hasil diagnosis — `recovery_sent_at` masih `null` (belum pernah ada email reset terkirim), redirect `ForgotPassword` menuju dashboard yang tidak menangani event recovery, dan tidak ada form set password baru di aplikasi.
 - 2026-08-19: Implementasi selesai — `UpdatePassword.vue` (halaman publik `/update-password`), route tanpa `meta.auth`, redirect `ForgotPassword` → `/update-password`. Build lulus.
-- 2026-08-19: Email akun operator diganti ke `operator@mailtrap.io` — update konsisten di `auth.users.email` + `auth.identities.identity_data` (kolom `email` generated, ikut berubah) + `public.operators.email`. `recovery_sent_at` kini terisi setelah permintaan reset (HTTP 200). SMTP kustom Mailtrap menunggu konfigurasi manual user di dashboard Supabase (kredensial dari inbox Mailtrap — langkah ada di `docs/ops.md` §4b).
+- 2026-08-19: Email akun operator diganti ke `operator@mailtrap.io` — update konsisten di `auth.users.email` + `auth.identities.identity_data` (kolom `email` generated, ikut berubah) + `public.operators.email`. `recovery_sent_at` kini terisi setelah permintaan reset (HTTP 200). SMTP kustom Resend menunggu konfigurasi manual user di dashboard Supabase (langkah ada di `docs/ops.md` §4b).
+- 2026-08-19: Provider SMTP dipindah dari Mailtrap (Email Testing — hanya menampung, tidak mengirim ke inbox asli) ke **Resend** agar email reset sampai ke inbox operator yang sebenarnya. `docs/ops.md` §4b diperbarui: host `smtp.resend.com`, port `465`, username `resend`, password = API key Resend, sender `onboarding@resend.dev` (atau domain sendiri yang terverifikasi). Catatan: email akun operator `operator@mailtrap.io` bukan alamat yang bisa menerima email — perlu diganti ke alamat asli operator saat SMTP aktif.

@@ -381,22 +381,34 @@ harus dipenuhi di dashboard:
   dikirim ke alamat mana pun, dengan rate limit awal 30/jam yang bisa
   dinaikkan di Rate Limits.
 
-#### Setup Mailtrap (SMTP kustom gratis) — dipakai project ini
+#### Setup Resend (SMTP kustom gratis) — dipakai project ini
 
-Email reset diverifikasi sampai tahap *diproses Supabase*; agar bisa
-**dibaca di inbox** gunakan Mailtrap (gratis, hanya menampung email — tidak
-meneruskan ke alamat asli):
+Resend mengirim email sungguhan ke inbox asli (bukan menampung seperti
+Mailtrap Email Testing). Free tier: 100 email/hari (3.000/bulan).
 
-1. Daftar di mailtrap.io → buat inbox **Email Testing** → buka tab
-   **Integrations → SMTP** untuk melihat kredensial (host
-   `sandbox.smtp.mailtrap.io`, port `465`/`587`/`2525`, username, password).
-2. Dashboard Supabase → Authentication → **SMTP Settings** → aktifkan
-   **Enable custom SMTP**, isi: host, port, username, password, sender
-   email (mis. `noreply@rempah.local`), sender name.
-3. Simpan, lalu tes dari halaman lupa password aplikasi — email reset akan
-   muncul di inbox Mailtrap dalam hitungan detik (cek juga `recovery_sent_at`).
-4. Catatan: untuk produksi nyata (email sampai ke user asli) ganti provider
-   pengiriman (Resend/SES/Postmark/SendGrid) dengan langkah yang sama.
+1. **Buat akun** di resend.com (gratis, verifikasi email login).
+2. **(Opsional, disarankan untuk produksi)** verifikasi *sending domain*:
+   resend.com → **Domains** → tambah domain kamu → ikuti instruksi DNS
+   (SPF + DKIM). Tanpa ini hanya boleh kirim dari `onboarding@resend.dev`.
+3. **Ambil API key**: resend.com → **API Keys** → **Create API Key** →
+   salin nilainya (sekali tampil). API key ini sekaligus menjadi password SMTP.
+4. Dashboard Supabase → Authentication → **SMTP Settings** → aktifkan
+   **Enable custom SMTP**, isi:
+   - Host: `smtp.resend.com`
+   - Port: `465`
+   - Username: `resend`
+   - Password: *(API key Resend dari langkah 3)*
+   - Sender email: `onboarding@resend.dev` (tanpa domain sendiri) atau
+     `noreply@<domain-kamu>` (jika langkah 2 selesai)
+   - Sender name: `REMPAH`
+   Alternatif: gunakan tombol integrasi **Resend** di halaman yang sama —
+   tempel API key, field host/port/username terisi otomatis.
+5. **Simpan**, lalu tes dari halaman lupa password aplikasi — email reset
+   muncul di inbox operator asli dalam hitungan detik (cek juga
+   `select recovery_sent_at from auth.users`).
+6. Catatan: setelah SMTP kustom aktif, rate limit awal 30 email/jam
+   (Authentication → Rate Limits). Email akun operator harus alamat yang
+   benar-benar bisa menerima email (bukan `@mailtrap.io`).
 
 ## 5. Peta kerja berikutnya
 
