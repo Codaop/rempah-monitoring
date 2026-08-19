@@ -299,7 +299,7 @@ powershell -Command "Stop-Process -Id <PID> -Force"
   `unknown_messages`, `devices`, `batch_logs` (migration
   `add_missing_tables_to_realtime_publication` — tanpanya channel realtime
   dashboard mati dan fallback polling 30 detik yang dipakai).
-- Seed demo: producer "Rempah Jaya", operator `admin@gmail.com`, 2 perangkat,
+- Seed demo: producer "Rempah Jaya", operator `operator@mailtrap.io`, 2 perangkat,
   1 session, 1 batch — hanya untuk demo.
 - RLS: operator hanya melihat data `producer_id` miliknya; `service-role` bypass.
 
@@ -359,15 +359,14 @@ harus dipenuhi di dashboard:
    plus `http://localhost:5173/update-password` untuk dev. Tanpa ini link di
    email ditolak.
 2. **Email penerima lolos validasi Supabase** — GoTrue versi terbaru punya
-   *extended email validation* yang memblokir alamat berisiko bounce.
-   Kasus nyata terverifikasi di project ini:
-   - `admin@gmail.com` **ditolak** dengan error `email_address_invalid`
-     karena GoTrue memblokir alamat gmail dengan lokal part < 6 karakter
-     (`admin` = 5 karakter).
-   - **Solusi**: gunakan email dengan lokal part ≥ 6 karakter (mis.
-     `admin1@gmail.com`), atau nonaktifkan extended email validation di
-     pengaturan auth bila tersedia. Email di `auth.users` dan
-     `operators.email` harus diubah bersamaan.
+   *extended email validation* yang memblokir alamat berisiko bounce
+   (mis. gmail dengan lokal part < 6 karakter). **Status project: sudah
+   diatasi** — email operator diubah dari `admin@gmail.com` menjadi
+   `operator@mailtrap.io` (lokal part 8 karakter; domain `mailtrap.io`
+   punya MX record sehingga lolos validasi). Perubahan dilakukan konsisten
+   di `auth.users`, `auth.identities`, dan `operators.email`.
+   Terverifikasi: `POST /auth/v1/recover` → **200** dan `recovery_sent_at`
+   terisi (lihat verifikasi cepat di bawah).
    - Verifikasi cepat: `select recovery_sent_at from auth.users` — terisi
      berarti email reset terkirim.
 
@@ -376,11 +375,28 @@ harus dipenuhi di dashboard:
 - **Built-in email service** (default, tanpa SMTP kustom) hanya mengirim ke
   alamat anggota tim proyek; selain itu gagal dengan *email not
   authorized*. Rate limit rendah dan availability best-effort — cukup untuk
-dev, tidak untuk produksi.
+  dev, tidak untuk produksi.
 - Untuk produksi: Dashboard → Authentication → SMTP Settings → pasang
   **custom SMTP** (Resend/SES/Postmark/SendGrid). Setelah itu email dapat
   dikirim ke alamat mana pun, dengan rate limit awal 30/jam yang bisa
   dinaikkan di Rate Limits.
+
+#### Setup Mailtrap (SMTP kustom gratis) — dipakai project ini
+
+Email reset diverifikasi sampai tahap *diproses Supabase*; agar bisa
+**dibaca di inbox** gunakan Mailtrap (gratis, hanya menampung email — tidak
+meneruskan ke alamat asli):
+
+1. Daftar di mailtrap.io → buat inbox **Email Testing** → buka tab
+   **Integrations → SMTP** untuk melihat kredensial (host
+   `sandbox.smtp.mailtrap.io`, port `465`/`587`/`2525`, username, password).
+2. Dashboard Supabase → Authentication → **SMTP Settings** → aktifkan
+   **Enable custom SMTP**, isi: host, port, username, password, sender
+   email (mis. `noreply@rempah.local`), sender name.
+3. Simpan, lalu tes dari halaman lupa password aplikasi — email reset akan
+   muncul di inbox Mailtrap dalam hitungan detik (cek juga `recovery_sent_at`).
+4. Catatan: untuk produksi nyata (email sampai ke user asli) ganti provider
+   pengiriman (Resend/SES/Postmark/SendGrid) dengan langkah yang sama.
 
 ## 5. Peta kerja berikutnya
 

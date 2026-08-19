@@ -15,3 +15,4 @@
 
 - 2026-08-19: Dibuat dari hasil verifikasi database — tabel `operators` tidak punya trigger otomatis dari `auth.users` dan hanya punya policy SELECT, sehingga insert harus via service role. Data saat ini: 1 operator (`admin@gmail.com`) milik producer "Rempah Jaya".
 - 2026-08-19: Dokumentasi ditulis di `docs/ops.md` §4b "Manajemen akun operator" (tambah operator, ganti password, syarat email reset, built-in vs custom SMTP). Temuan tambahan dari tiket 47: `admin@gmail.com` ditolak extended email validation (gmail lokal part < 6), jadi panduan menyarankan email ≥ 6 karakter atau nonaktifkan validasi tersebut.
+- 2026-08-19: `docs/ops.md` §4b diperbarui — email operator kini `operator@mailtrap.io` (seed demo + syarat email reset), plus subseksi **Setup Mailtrap** (SMTP kustom gratis: host `sandbox.smtp.mailtrap.io`, langkah isi SMTP Settings di dashboard Supabase).

@@ -4,17 +4,17 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** done (kode) — verifikasi email terkirim terblokir konfigurasi akun
+**Status:** done — email reset terkirim; SMTP Mailtrap (opsional) menunggu konfigurasi user
 
 - [x] Link dari email reset membuka halaman "Atur Password Baru", bukan halaman dashboard
 - [x] Sesi recovery (event `PASSWORD_RECOVERY`) ditangani dengan benar oleh halaman tersebut
 - [x] Form password baru + konfirmasi dengan validasi (kecocokan konfirmasi, aturan panjang) dan umpan balik error yang jelas
 - [x] Setelah berhasil, operator dapat login dengan password baru
-- [~] Permintaan reset mengirim email asli — **terblokir**: email `admin@gmail.com` ditolak *extended email validation* GoTrue (lokal part `admin` = 5 < 6 karakter untuk domain gmail). Redirect URL sudah diarahkan ke `/update-password` dan build lulus; pengiriman email butuh ganti email akun atau nonaktifkan validasi tersebut.
+- [x] Permintaan reset mengirim email asli — **selesai**: email akun operator diubah dari `admin@gmail.com` → `operator@mailtrap.io` (lokal part 8 karakter, domain punya MX — lolos extended email validation). Verifikasi: `POST /auth/v1/recover` → **200**, `recovery_sent_at` terisi.
 - [x] Router tidak mengarahkan halaman recovery kembali ke login/dashboard
 
 ## Comments
 
 - 2026-08-19: Dibuat dari hasil diagnosis — `recovery_sent_at` masih `null` (belum pernah ada email reset terkirim), redirect `ForgotPassword` menuju dashboard yang tidak menangani event recovery, dan tidak ada form set password baru di aplikasi.
 - 2026-08-19: Implementasi selesai — `UpdatePassword.vue` (halaman publik `/update-password`), route tanpa `meta.auth`, redirect `ForgotPassword` → `/update-password`. Build lulus.
-- 2026-08-19: Verifikasi email nyata via `POST /auth/v1/recover` — respons `400 email_address_invalid`. Penyebab (dari source GoTrue): *extended email validation* memblokir gmail dengan lokal part < 6 karakter; `admin` = 5. Email acak di domain lain mengembalikan 200 palsu (anti-enumeration), mengonfirmasi kegagalan terjadi di tahap kirim email, bukan validasi input. Solusi terdokumentasi di `docs/ops.md` §4b.
+- 2026-08-19: Email akun operator diganti ke `operator@mailtrap.io` — update konsisten di `auth.users.email` + `auth.identities.identity_data` (kolom `email` generated, ikut berubah) + `public.operators.email`. `recovery_sent_at` kini terisi setelah permintaan reset (HTTP 200). SMTP kustom Mailtrap menunggu konfigurasi manual user di dashboard Supabase (kredensial dari inbox Mailtrap — langkah ada di `docs/ops.md` §4b).
