@@ -303,6 +303,85 @@ powershell -Command "Stop-Process -Id <PID> -Force"
   1 session, 1 batch — hanya untuk demo.
 - RLS: operator hanya melihat data `producer_id` miliknya; `service-role` bypass.
 
+## 4b. Manajemen akun operator
+
+Semua operasi di bawah butuh akses **Supabase Dashboard** (SQL Editor berjalan
+sebagai `postgres`/service role, jadi melewati RLS). Tabel `operators` hanya
+punya policy `SELECT` untuk JWT operator dan **tidak ada trigger** yang membuat
+baris `operators` dari `auth.users` — sehingga menambah operator = **2 langkah
+manual**.
+
+### Tambah operator baru
+
+1. **Buat user auth** — Dashboard → Authentication → Users → **Add user**,
+   isi email + password. Catat UUID user (kolom ID) setelah dibuat.
+2. **Tautkan ke producer** — Dashboard → SQL Editor, jalankan (ganti nilai
+   `<UUID>` dan `<producer-id>`):
+
+   ```sql
+   insert into operators (id, producer_id, email, role)
+   values (
+     '<UUID-auth-user>'::uuid,
+     '<producer-id>'::uuid,   -- mis. 0d0d0000-0000-4000-8000-000000000001
+     'nama@email.com',
+     'operator'
+   );
+   ```
+
+   Kolom `id` **wajib sama** dengan `auth.users.id` (PK operator = id user
+   auth). Email di kolom `operators.email` sebaiknya sama dengan email login.
+
+Cara alternatif via Management API / admin client: `supabase.auth.admin
+.createUser(...)` lalu insert `operators` dengan service role — hasil akhir
+sama (user auth + baris operators).
+
+### Ganti password operator secara manual
+
+- **Dashboard** — Authentication → Users → pilih user → ⋯ → **Reset
+  password** (mengirim email reset ke user) atau **Update user** (set
+  password baru langsung).
+- **SQL Editor** (admin, langsung tanpa email):
+  ```sql
+  update auth.users
+  set encrypted_password = crypt('password-baru-min-8-karakter', gen_salt('bf'))
+  where id = '<UUID-auth-user>'::uuid;
+  ```
+
+### Fitur lupa password — persyaratan agar email terkirim
+
+Kode alur reset sudah lengkap di aplikasi (halaman `ForgotPassword` → email →
+halaman publik `UpdatePassword`). Agar email benar-benar terkirim, dua hal ini
+harus dipenuhi di dashboard:
+
+1. **Redirect URL terdaftar** — Dashboard → Authentication → URL
+   Configuration → **Redirect URLs** harus memuat alamat halaman
+   `update-password` aplikasi (mis. `https://<domain>/update-password`),
+   plus `http://localhost:5173/update-password` untuk dev. Tanpa ini link di
+   email ditolak.
+2. **Email penerima lolos validasi Supabase** — GoTrue versi terbaru punya
+   *extended email validation* yang memblokir alamat berisiko bounce.
+   Kasus nyata terverifikasi di project ini:
+   - `admin@gmail.com` **ditolak** dengan error `email_address_invalid`
+     karena GoTrue memblokir alamat gmail dengan lokal part < 6 karakter
+     (`admin` = 5 karakter).
+   - **Solusi**: gunakan email dengan lokal part ≥ 6 karakter (mis.
+     `admin1@gmail.com`), atau nonaktifkan extended email validation di
+     pengaturan auth bila tersedia. Email di `auth.users` dan
+     `operators.email` harus diubah bersamaan.
+   - Verifikasi cepat: `select recovery_sent_at from auth.users` — terisi
+     berarti email reset terkirim.
+
+### Catatan pengiriman email (built-in vs SMTP kustom)
+
+- **Built-in email service** (default, tanpa SMTP kustom) hanya mengirim ke
+  alamat anggota tim proyek; selain itu gagal dengan *email not
+  authorized*. Rate limit rendah dan availability best-effort — cukup untuk
+dev, tidak untuk produksi.
+- Untuk produksi: Dashboard → Authentication → SMTP Settings → pasang
+  **custom SMTP** (Resend/SES/Postmark/SendGrid). Setelah itu email dapat
+  dikirim ke alamat mana pun, dengan rate limit awal 30/jam yang bisa
+  dinaikkan di Rate Limits.
+
 ## 5. Peta kerja berikutnya
 
 Bridge runtime MQTT, command dispatch + feedback, offline detection, compute,
