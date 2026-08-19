@@ -280,8 +280,14 @@ npm run build                  # menghasilkan dist/ statik
 ```
 
 - Config: `dashboard/.env` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-  (gitignored).
-- `dist/` bisa diserve oleh Vercel/Netlify/CDN apa pun.
+  (gitignored). Untuk link reset password di email gunakan
+  `VITE_SITE_URL` (mis. `https://<domain-vercel>`); tanpa env ini fallback
+  ke `window.location.origin` (berbahaya di produksi — link email bisa
+  mengarah ke localhost).
+- `dist/` bisa diserve oleh Vercel/Netlify/CDN apa pun. Untuk SPA
+  (history mode) di Vercel wajib ada `dashboard/vercel.json` dengan
+  rewrite ke `index.html` — tanpa itu deep link seperti
+  `/update-password` 404 saat dibuka langsung.
 
 ### STOP — hentikan dashboard
 

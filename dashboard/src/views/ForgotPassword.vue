@@ -9,6 +9,13 @@ const sent = ref(false);
 const error = ref("");
 const loading = ref(false);
 
+// Base URL aplikasi untuk link reset di email. Di produksi (Vercel) di-set
+// via env VITE_SITE_URL agar link tidak pernah mengarah ke localhost;
+// fallback ke origin halaman saat ini (berguna saat dev).
+const siteUrl = (
+  import.meta.env.VITE_SITE_URL || window.location.origin
+).replace(/\/$/, "");
+
 async function submit() {
   error.value = "";
   sent.value = false;
@@ -16,7 +23,7 @@ async function submit() {
   const { error: err } = await supabase.auth.resetPasswordForEmail(
     email.value.trim(),
     {
-      redirectTo: window.location.origin + "/update-password",
+      redirectTo: siteUrl + "/update-password",
     }
   );
   loading.value = false;
