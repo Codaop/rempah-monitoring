@@ -416,6 +416,28 @@ Mailtrap Email Testing). Free tier: 100 email/hari (3.000/bulan).
    (Authentication → Rate Limits). Email akun operator harus alamat yang
    benar-benar bisa menerima email (bukan `@mailtrap.io`).
 
+### Template email reset (Recovery)
+
+Template HTML siap pakai ada di `docs/email/recovery.html` — branding REMPAH
+(navy `#1C2B3A`, teal `#3A7CA5`, background `#E8ECF0`), mobile-responsive,
+inline CSS + VML bulletproof button (Outlook), link fallback teks, dan footer
+keamanan. Variabel GoTrue yang dipakai: `{{ .ConfirmationURL }}`,
+`{{ .SiteURL }}`, `{{ .Email }}`.
+
+Cara pasang di dashboard Supabase:
+
+1. Dashboard → Authentication → **Email Templates** → pilih **Reset
+   password**.
+2. Salin seluruh isi `docs/email/recovery.html` ke kolom **HTML content**.
+   Subject boleh diubah, mis. `Atur ulang kata sandi — REMPAH`.
+3. **Simpan**, lalu tes: minta reset dari halaman lupa password → cek inbox.
+
+Catatan logo: tag `<img src="{{ .SiteURL }}/logo.svg">` mengacu ke logo yang
+di-host di domain aplikasi (Vercel). Sebagian email client tidak merender SVG
+— untuk kompatibilitas maksimal, upload versi PNG (200–300px) ke hosting
+publik dan ganti `src`-nya. Tanpa file logo, header tetap tampil baik karena
+brand name `REMPAH` dirender sebagai teks.
+
 ## 5. Peta kerja berikutnya
 
 Bridge runtime MQTT, command dispatch + feedback, offline detection, compute,
