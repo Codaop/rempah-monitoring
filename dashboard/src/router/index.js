@@ -14,6 +14,11 @@ const routes = [
     component: () => import("../views/ForgotPassword.vue"),
   },
   {
+    path: "/update-password",
+    name: "update-password",
+    component: () => import("../views/UpdatePassword.vue"),
+  },
+  {
     path: "/dashboard",
     name: "dashboard",
     component: () => import("../views/Dashboard.vue"),

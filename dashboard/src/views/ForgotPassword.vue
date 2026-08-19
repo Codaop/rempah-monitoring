@@ -16,7 +16,7 @@ async function submit() {
   const { error: err } = await supabase.auth.resetPasswordForEmail(
     email.value.trim(),
     {
-      redirectTo: window.location.origin + "/dashboard",
+      redirectTo: window.location.origin + "/update-password",
     }
   );
   loading.value = false;
