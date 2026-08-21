@@ -209,6 +209,33 @@ az containerapp update --name rempah-bridge --resource-group rempah-rg \
 az group delete --name rempah-rg --yes --no-wait
 ```
 
+### Nonaktifkan sementara (pakai bridge lokal di laptop)
+
+CLI menolak `--max-replicas 0`, jadi cara yang pasti untuk mematikan bridge
+Azure adalah **deactivate revisi aktif** — replica langsung `NotRunning` dan
+tidak perlu menunggu scale-down:
+
+```bash
+# 1. Cek nama revisi aktif
+az containerapp revision list --name rempah-bridge --resource-group rempah-rg --query "[].name" -o tsv
+# 2. Matikan revisi (replica berhenti)
+az containerapp revision deactivate --name rempah-bridge --resource-group rempah-rg --revision <nama-revisi>
+# 3. Verifikasi
+az containerapp replica list --name rempah-bridge --resource-group rempah-rg
+az containerapp replica show --name rempah-bridge --resource-group rempah-rg --replica <nama-replica> --query "properties.runningState"
+```
+
+Untuk menghidupkan kembali (kembali ke Azure):
+
+```bash
+az containerapp revision activate --name rempah-bridge --resource-group rempah-rg --revision <nama-revisi>
+az containerapp update --name rempah-bridge --resource-group rempah-rg --min-replicas 1 --max-replicas 1
+```
+
+> ⚠️ Jangan jalankan bridge Azure dan bridge lokal bersamaan — dua bridge
+> akan memproses command yang sama (terkirim 2× ke device) dan meng-insert
+> telemetry dobel ke `sensor_logs`.
+
 ---
 
 ## Catatan biaya (estimasi)

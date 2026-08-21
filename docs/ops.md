@@ -24,6 +24,13 @@ Inggris; penjelasan dalam Bahasa Indonesia.
 
 ## 0. Workflow ringkas (3 terminal)
 
+> **Setup saat ini (2026-08): bridge dijalankan LOKAL di laptop** — bridge
+> Azure di-nonaktifkan (revisi di-deactivate, `runningState NotRunning`)
+> karena latensi. Web tetap memakai Supabase yang sama, jadi tidak ada
+> perubahan konfigurasi web. Jangan jalankan bridge Azure dan lokal
+> bersamaan — dua bridge = data telemetry dobel + command terkirim dua kali
+> ke device.
+
 ```bash
 # Terminal A — Bridge (harus jalan duluan, service)
 cd bridge
@@ -40,6 +47,16 @@ npm run dev
 
 Buka `http://localhost:5173`, login sebagai operator, dan dashboard akan
 menerima data realtime tiap ~2 detik.
+
+### Kembalikan bridge ke Azure (opsional)
+
+```bash
+# Aktifkan kembali revisi yang di-deactivate
+az containerapp revision list --name rempah-bridge --resource-group rempah-rg --query "[].name" -o tsv
+az containerapp revision activate --name rempah-bridge --resource-group rempah-rg --revision <nama-revisi>
+# Naikkan lagi min-replicas ke 1 supaya selalu jalan
+az containerapp update --name rempah-bridge --resource-group rempah-rg --min-replicas 1 --max-replicas 1
+```
 
 ## 0a. START & STOP — ringkasan cepat
 
