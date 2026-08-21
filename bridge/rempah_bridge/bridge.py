@@ -4,6 +4,7 @@ from rempah_bridge.model import Command, DeviceState
 from rempah_bridge.ports import DbPort, MqttPort
 
 import time
+from datetime import datetime, timezone
 
 
 # Both action names are accepted so the dashboard's "EMERGENCY_STOP" and the
@@ -35,6 +36,23 @@ class Bridge:
         self.topic_root = topic_root
         self._drips: dict[str, int] = {}
 
+    @staticmethod
+    def _coerce_ts(value: object, fallback_epoch: float) -> str:
+        """Kembalikan `ts` payload yang valid ISO 8601; fallback ke waktu terima
+        bridge bila tidak valid (angka, string non-tanggal, atau format waktu
+        saja). Device yang salah format tidak boleh mematikan pipeline
+        telemetry — lebih baik timestamp terima bridge daripada data hilang
+        (pola yang sama dengan first_seen_at, ticket 41).
+        """
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if isinstance(parsed, datetime):  # bukan objek time ("10:00:00")
+                    return value
+            except ValueError:
+                pass
+        return datetime.fromtimestamp(fallback_epoch, tz=timezone.utc).isoformat()
+
     def process_command(self, command: Command) -> None:
         if command.action in _ESTOP_ACTIONS:
             self._forward(command)
@@ -64,18 +82,21 @@ class Bridge:
         # payload — retained state lama bisa membawa `ts` usang dan membuat
         # first_seen_at mencatat waktu yang salah (ticket 41).
         now = self.clock()
+        # `ts` payload yang rusak (mis. "955848") diganti waktu terima bridge
+        # supaya insert sensor_logs tidak ditolak Postgres (ticket 49).
+        payload = {**payload, "ts": self._coerce_ts(payload.get("ts"), now)}
         self.db.insert_telemetry(device_id, payload)
         self.db.set_last_seen(device_id, now)
         self.db.set_offline(device_id, False)
         self.db.note_first_contact(device_id, now)
         temp = payload.get("boiler_temp_c")
         if temp is not None and temp > self.over_temp_threshold_c:
-            self.db.insert_alert(device_id, "over_temperature", temp, payload.get("ts"))
+            self.db.insert_alert(device_id, "over_temperature", temp, payload["ts"])
         drips = payload.get("drip_count", 0)
         if drips:
             self._drips[device_id] = self._drips.get(device_id, 0) + drips
             estimated_yield_l = self._drips[device_id] * self.drip_ml / 1000
-            self.db.update_estimate(device_id, estimated_yield_l, payload.get("ts"))
+            self.db.update_estimate(device_id, estimated_yield_l, payload["ts"])
 
     def handle_state(self, payload: dict) -> None:
         device_id = payload["device_id"]
@@ -86,7 +107,7 @@ class Bridge:
             )
             return
         mode = payload["mode"]
-        ts = payload["ts"]
+        ts = self._coerce_ts(payload.get("ts"), self.clock())
         previous = self.db.device_state(device_id)  # read before overwriting
         self.db.set_device_state(device_id, mode, ts)
         self.db.note_first_contact(device_id, self.clock())

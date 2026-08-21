@@ -396,6 +396,59 @@ def test_state_records_first_contact(mqtt: FakeMqtt) -> None:
     assert db.first_contacts == [("d1", 1070.0)]
 
 
+def test_telemetry_with_invalid_ts_falls_back_to_bridge_clock(mqtt: FakeMqtt) -> None:
+    """`ts` payload yang rusak (angka non-timestamp) tidak boleh mematikan
+    pipeline — diganti waktu terima bridge supaya insert tidak ditolak
+    Postgres (ticket 49)."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db, clock=lambda: 1720000000.0)
+    payload = {
+        "ts": 955848,  # salah format — bukan ISO 8601
+        "boiler_temp_c": 95.0,
+        "gas_mass_kg": 28.6,
+        "water_level": "OK",
+        "drip_count": 0,
+        "flame_lit": True,
+    }
+
+    bridge.handle_telemetry("d1", payload)
+
+    expected_ts = "2024-07-03T09:46:40+00:00"
+    assert db.telemetry == [{"device_id": "d1", **payload, "ts": expected_ts}]
+    assert db.last_seen == {"d1": 1720000000.0}
+    assert db.first_contacts == [("d1", 1720000000.0)]
+    assert db.offline_flags == [("d1", False)]
+
+
+def test_telemetry_with_clock_string_ts_falls_back(mqtt: FakeMqtt) -> None:
+    """String waktu saja ("10:00:00") bukan datetime — harus di-fallback juga."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db, clock=lambda: 1720000000.0)
+    payload = {"ts": "10:00:00", "boiler_temp_c": 95.0, "drip_count": 0}
+
+    bridge.handle_telemetry("d1", payload)
+
+    assert db.telemetry[0]["ts"] == "2024-07-03T09:46:40+00:00"
+
+
+def test_state_with_invalid_ts_falls_back_to_bridge_clock(mqtt: FakeMqtt) -> None:
+    """State message dengan ts rusak tetap diterapkan memakai waktu terima bridge."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db, clock=lambda: 1720000000.0)
+    payload = {
+        "device_id": "d1",
+        "mode": "PREHEAT",
+        "cause": "detected",
+        "ts": "955848",
+    }
+
+    bridge.handle_state(payload)
+
+    expected_ts = "2024-07-03T09:46:40+00:00"
+    assert db.state_updates == [{"device_id": "d1", "mode": "PREHEAT", "ts": expected_ts}]
+    assert db.batch_opens == [("d1", expected_ts)]
+
+
 def test_telemetry_from_unknown_device_is_recorded_not_persisted(mqtt: FakeMqtt) -> None:
     db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
     bridge = Bridge(mqtt=mqtt, db=db)

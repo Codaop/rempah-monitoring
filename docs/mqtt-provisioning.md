@@ -80,6 +80,11 @@ Kartu flash menampilkan (dapat dibuka lagi dari daftar perangkat kapan saja):
       — di-set di firmware, **bukan** di web HiveMQ
 - [ ] Username/password **bersama** (dari kartu flash)
 - [ ] Topic telemetry/state sesuai UUID device (dari kartu flash)
+- [ ] Field `ts` di payload — **wajib string ISO 8601 UTC** (lihat bagian
+      Canonical Payload), bukan angka/`HHMMSS`. Contoh benar:
+      `"ts": "2026-08-12T08:30:00Z"`. Format selain itu membuat data
+      ditolak database (bridge akan memakai waktu terimanya sendiri sebagai
+      pengganti — data tetap masuk, tapi timestamp jadi kurang akurat)
 - [ ] Flash firmware via USB/serial
 
 > **Catatan:** WiFi-AP provisioning (device jadi hotspot untuk di-set ulang tanpa
@@ -96,6 +101,12 @@ Kartu flash menampilkan (dapat dibuka lagi dari daftar perangkat kapan saja):
 
 ### Troubleshooting
 
+- **Device Online tapi tidak ada data / status "menunggu koneksi pertama":**
+  cek Bridge log — kalau muncul `date/time field value out of range`,
+  `ts` di payload tidak valid (bukan ISO 8601). Perbaiki format `ts` di
+  firmware menjadi string ISO 8601 UTC (mis. `2026-08-12T08:30:00Z`).
+  Bridge sejak ticket 49 menormalkan `ts` rusak ke waktu terimanya sendiri
+  sehingga device tetap tercatat online, tapi timestamp asli device hilang.
 - **Device tak dikenal:** bridge mencatat pesan dari `device_id` yang tidak
   terdaftar ke tabel `unknown_messages` dan dashboard menampilkan alert
   "Pesan dari device tak dikenal …" — biasanya UUID di topik salah ketik atau
