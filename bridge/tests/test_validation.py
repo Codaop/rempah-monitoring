@@ -127,8 +127,9 @@ def test_emergency_stop_bypasses_validation_and_is_always_forwarded(mqtt: FakeMq
 
     bridge.process_command(estop)
 
+    # Firmware hanya memahami "mati" — bridge menerjemahkan ESTOP ke sana.
     assert mqtt.published == [
-        ("rempah/d1/command", {"command_id": "c9", "action": "ESTOP"})
+        ("rempah/d1/command", {"command_id": "c9", "action": "mati"})
     ]
 
 
@@ -141,7 +142,7 @@ def test_dashboard_emergency_stop_action_name_is_always_forwarded(mqtt: FakeMqtt
     bridge.process_command(estop)
 
     assert mqtt.published == [
-        ("rempah/d1/command", {"command_id": "c10", "action": "EMERGENCY_STOP"})
+        ("rempah/d1/command", {"command_id": "c10", "action": "mati"})
     ]
 
 
@@ -394,6 +395,45 @@ def test_state_records_first_contact(mqtt: FakeMqtt) -> None:
 
     # first_seen_at memakai waktu terima bridge, bukan ts payload yang usang.
     assert db.first_contacts == [("d1", 1070.0)]
+
+
+def test_power_on_is_translated_to_firmware_command_mulai(mqtt: FakeMqtt) -> None:
+    """POWER_ON dari dashboard diterjemahkan menjadi "mulai" untuk firmware."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c1", device_id="d1", action="POWER_ON", expected_state="IDLE")
+
+    bridge.process_command(command)
+
+    assert mqtt.published == [
+        ("rempah/d1/command", {"command_id": "c1", "action": "mulai"})
+    ]
+
+
+def test_power_off_is_translated_to_firmware_command_mati(mqtt: FakeMqtt) -> None:
+    """POWER_OFF dari dashboard diterjemahkan menjadi "mati" untuk firmware."""
+    db = FakeDb(DeviceState(device_id="d1", mode="DISTILLING"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c2", device_id="d1", action="POWER_OFF", expected_state="DISTILLING")
+
+    bridge.process_command(command)
+
+    assert mqtt.published == [
+        ("rempah/d1/command", {"command_id": "c2", "action": "mati"})
+    ]
+
+
+def test_unknown_action_is_forwarded_unchanged(mqtt: FakeMqtt) -> None:
+    """Action di luar tabel mapping (mis. perangkat kontrak penuh) tetap diteruskan."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c3", device_id="d1", action="REFILL", expected_state="IDLE")
+
+    bridge.process_command(command)
+
+    assert mqtt.published == [
+        ("rempah/d1/command", {"command_id": "c3", "action": "REFILL"})
+    ]
 
 
 def test_telemetry_with_invalid_ts_falls_back_to_bridge_clock(mqtt: FakeMqtt) -> None:

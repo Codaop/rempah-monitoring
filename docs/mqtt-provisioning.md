@@ -211,6 +211,26 @@ Dikirim oleh Bridge ke device, QoS 1.
 | `COOLING_OFF` | Matikan pompa pendingin |
 | `EMERGENCY_STOP` | Emergency stop — selalu diforward tanpa validasi state |
 
+#### Nama action di firmware ESP32 (ticket 50)
+
+Firmware ESP32 saat ini hanya memahami action **bahasa Indonesia** dari
+`doc["action"]` di `mqttCallback`: `mulai` (start sistem) dan `mati` (stop
+sistem). Bridge menerjemahkan action kontrak → bahasa firmware saat
+forward ke MQTT, jadi dashboard tidak berubah:
+
+| Dari dashboard/bridge (kontrak) | Yang sampai ke device | Efek di firmware |
+|---|---|---|
+| `POWER_ON` | `mulai` | `mulaiSistem()` — servo buka, pematik, mode PREHEAT |
+| `POWER_OFF` | `mati` | `matikanSistem()` — kompor tutup, semua relay off, mode IDLE |
+| `EMERGENCY_STOP` / `ESTOP` | `mati` | `matikanSistem()` (satu-satunya aksi stop yang dipahami) |
+| `REFILL` / `COOLING_ON` / `COOLING_OFF` | *(diteruskan apa adanya)* | Belum ditangani firmware → log "PERINTAH TIDAK DIKENAL" |
+
+> **Catatan untuk tim firmware:** jika ingin mendukung aksi lain (`REFILL`,
+> `COOLING_ON`, `COOLING_OFF`, dan `EMERGENCY_STOP` sebagai aksi terpisah),
+> tambahkan cabang `else if` di `mqttCallback` dan kirim `cause:
+> "command_executed:<command_id>"` pada state setelah eksekusi agar dashboard
+> bisa menandai command selesai (bukan hanya `dispatched`).
+
 ---
 
 ## Topic Summary

@@ -11,6 +11,18 @@ from datetime import datetime, timezone
 # firmware contract's "ESTOP" both bypass state validation.
 _ESTOP_ACTIONS = {"ESTOP", "EMERGENCY_STOP"}
 
+# Firmware ESP32 (ticket 50) memahami action bahasa Indonesia "mulai"/"mati"
+# dari `doc["action"]` di mqttCallback. Dashboard tetap memakai nama kontrak
+# internasional (POWER_ON/POWER_OFF/EMERGENCY_STOP); bridge menerjemahkannya
+# saat forward ke MQTT. Action yang tidak ada di tabel diteruskan apa adanya
+# (perangkat dengan kontrak penuh tetap kompatibel).
+_FIRMWARE_ACTIONS = {
+    "POWER_ON": "mulai",
+    "POWER_OFF": "mati",
+    "ESTOP": "mati",
+    "EMERGENCY_STOP": "mati",
+}
+
 # Modes that count as "heating" (open a pending batch) and "run over" (close).
 _HEATING_MODES = {"PREHEAT", "DISTILLING"}
 _TERMINAL_MODES = {"IDLE", "ERROR", "ESTOP"}
@@ -64,9 +76,11 @@ class Bridge:
             self.db.mark_command(command.id, "rejected")
 
     def _forward(self, command: Command) -> None:
+        # Terjemahkan action kontrak ke bahasa firmware ("mulai"/"mati").
+        action = _FIRMWARE_ACTIONS.get(command.action, command.action)
         self.mqtt.publish(
             f"{self.topic_root}/{command.device_id}/command",
-            {"command_id": command.id, "action": command.action},
+            {"command_id": command.id, "action": action},
         )
         self.db.mark_command(command.id, "dispatched")
 
