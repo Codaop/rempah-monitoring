@@ -160,24 +160,26 @@ async function signOut() {
       <!-- Profile card -->
       <div class="card profile-card">
         <div class="avatar-col">
-          <div class="avatar-circle">
-            <div class="avatar-media">
-              <img
-                v-if="avatarUrl"
-                :src="avatarUrl"
-                alt="Foto profil"
-                class="avatar-img"
-              />
-              <svg
-                v-else
-                viewBox="0 0 100 100"
-                xmlns="http://www.w3.org/2000/svg"
-                width="80"
-                height="80"
-              >
-                <circle cx="50" cy="35" r="22" fill="#94a3b8" />
-                <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
-              </svg>
+          <div class="avatar-wrap">
+            <div class="avatar-circle">
+              <div class="avatar-media">
+                <img
+                  v-if="avatarUrl"
+                  :src="avatarUrl"
+                  alt="Foto profil"
+                  class="avatar-img"
+                />
+                <svg
+                  v-else
+                  viewBox="0 0 100 100"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="80"
+                  height="80"
+                >
+                  <circle cx="50" cy="35" r="22" fill="#94a3b8" />
+                  <ellipse cx="50" cy="85" rx="32" ry="22" fill="#94a3b8" />
+                </svg>
+              </div>
             </div>
             <button
               type="button"
@@ -363,19 +365,24 @@ async function signOut() {
   min-width: 140px;
 }
 
+.avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .avatar-circle {
   width: 100px;
   height: 100px;
   border-radius: 50%;
   background: #e2e8f0;
-  position: relative;
+  overflow: hidden;
 }
 
 .avatar-media {
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -389,25 +396,34 @@ async function signOut() {
 
 .avatar-edit {
   position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 30px;
-  height: 30px;
+  bottom: -2px;
+  right: -2px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: 2px solid #fff;
+  border: 2.5px solid #fff;
   background: var(--teal);
   display: grid;
   place-items: center;
   cursor: pointer;
   padding: 0;
-  transition: filter 0.15s;
+  transition:
+    filter 0.15s,
+    transform 0.15s;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
 }
-.avatar-edit:hover {
+.avatar-edit:hover:not(:disabled) {
   filter: brightness(1.12);
+  transform: scale(1.08);
+}
+.avatar-edit:active:not(:disabled) {
+  transform: scale(0.95);
 }
 .avatar-edit:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  filter: grayscale(0.5);
 }
 
 .avatar-file {
