@@ -55,8 +55,8 @@ const sparkTemp = computed(() =>
 const sparkGas = computed(() =>
   deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.gas_mass_kg)
 );
-const sparkWater = computed(() =>
-  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.water_level)
+const sparkCooling = computed(() =>
+  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.cooling_temp_c)
 );
 const sparkYield = computed(() =>
   batchLog.value && batch.value ? [batchLog.value.estimated_yield || 0] : [0]
@@ -507,11 +507,11 @@ async function refreshState() {
         </MetricCard>
 
         <MetricCard
-          label="LEVEL AIR"
-          :value="fmtNum(latest.water_level)"
-          unit="%"
-          :data="sparkWater"
-          color="#3a7ca5"
+          label="SUHU PENDINGIN"
+          :value="fmtNum(latest.cooling_temp_c)"
+          unit="°C"
+          :data="sparkCooling"
+          color="#2f9e63"
         >
           <template #icon>
             <svg
@@ -525,6 +525,7 @@ async function refreshState() {
               stroke-linejoin="round"
             >
               <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+              <path d="M8 12h8" />
             </svg>
           </template>
         </MetricCard>

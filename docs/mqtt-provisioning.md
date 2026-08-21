@@ -128,6 +128,7 @@ Dikirim setiap **5 detik**, QoS 1, **bukan retained**.
 {
   "ts": "2026-08-12T08:30:00Z",
   "boiler_temp_c": 94.5,
+  "cooling_temp_c": 38.2,
   "gas_mass_kg": 28.6,
   "water_level": 65.2,
   "drip_count": 7,
@@ -138,7 +139,8 @@ Dikirim setiap **5 detik**, QoS 1, **bukan retained**.
 | Field | Type | Keterangan |
 |---|---|---|
 | `ts` | ISO 8601 UTC | Timestamp dari device (RTC atau NTP) |
-| `boiler_temp_c` | number | Suhu boiler dalam °C |
+| `boiler_temp_c` | number | Suhu boiler dalam °C (termokopel 1) |
+| `cooling_temp_c` | number | Suhu pendingin dalam °C (termokopel 2, opsional — bisa `null` jika sensor kedua tidak terpasang) |
 | `gas_mass_kg` | number | Massa/berat gas LPG dari sensor beban (load cell) dalam kg |
 | `water_level` | number | Level air boiler (0–100 %) |
 | `drip_count` | integer | Jumlah drip yang terhitung dalam interval ini |

@@ -63,6 +63,11 @@ def telemetry_payload() -> dict:
         "boiler_temp_c": round(
             94.5 + 3.0 * math.sin(t / 45) + 0.5 * math.sin(t / 7) + random.uniform(-0.1, 0.1), 2
         ),
+        # Sensor suhu kedua (pendingin/cooling): lebih dingin dari boiler,
+        # naik perlahan seiring sistem berjalan.
+        "cooling_temp_c": round(
+            32.0 + 0.05 * mins + 2.0 * math.sin(t / 40) + random.uniform(-0.1, 0.1), 2
+        ),
         # Sensor beban (load cell): massa tabung LPG menurun seiring konsumsi.
         # Asumsi tabung 15 kg + tare ~14 kg (total ~29 kg saat penuh).
         "gas_mass_kg": round(
