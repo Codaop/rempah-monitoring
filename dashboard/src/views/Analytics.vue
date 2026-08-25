@@ -152,9 +152,6 @@ async function loadSnapshot() {
 const estimatedYield = computed(
   () => snapshot.value?.batchLog?.estimated_yield || null
 );
-const targetYield = computed(
-  () => snapshot.value?.batch?.target_yield_l || null
-);
 
 // Status online/offline jujur dari last_seen_at per perangkat (threshold 60s,
 // konsisten dengan OFFLINE_AFTER_S bridge dan dashboard).
@@ -175,27 +172,12 @@ const dataFlowing = computed(() => {
   const age = latestSensorAge.value;
   return age !== null && age >= 0 && age < OFFLINE_MS;
 });
-const yieldProgress = computed(() => {
-  if (!estimatedYield.value || !targetYield.value) return 0;
-  return Math.min(
-    100,
-    Math.round((Number(estimatedYield.value) / Number(targetYield.value)) * 100)
-  );
-});
 
 // ── Batch-scoped report (ticket 13) ────────────────────────────────────────
 
 const selectedBatch = computed(
   () => batchOptions.value.find((b) => b.id === selectedBatchId.value) || null
 );
-
-const reportProgress = computed(() => {
-  const r = report.value;
-  if (!r) return 0;
-  const target = Number(r.batch.target_yield_l) || 0;
-  const est = Number(r.log?.estimated_yield) || 0;
-  return target ? Math.min(100, Math.round((est / target) * 100)) : 0;
-});
 
 function deviceNameOf(id) {
   const d = snapshot.value?.devices.find((x) => x.id === id);
@@ -286,9 +268,7 @@ function openReport(print) {
   if (!r) return;
   const b = r.batch;
   const log = r.log || {};
-  const target = Number(b.target_yield_l) || 0;
   const est = Number(log.estimated_yield) || 0;
-  const pct = target ? Math.min(100, Math.round((est / target) * 100)) : 0;
   const durationMin =
     log.duration != null
       ? Math.round(Number(log.duration) / 60)
@@ -327,7 +307,7 @@ function openReport(print) {
     <tr><th>Massa Muatan</th><td>${b.charge_mass_kg ? fmtNum(b.charge_mass_kg) + " kg" : "—"}</td></tr>
     <tr><th>Penggunaan Gas</th><td>${gasUsed} ${gasDetail}</td></tr>
     <tr><th>Suhu Puncak</th><td>${log.peak_temp != null ? fmtNum(log.peak_temp) + " °C" : "—"}</td></tr>
-    <tr><th>Hasil Estimasi vs Target</th><td>${fmtNum(est)} L / ${target ? fmtNum(target) + " L" : "—"} (${pct}%)</td></tr>
+    <tr><th>Hasil Estimasi</th><td>${fmtNum(est)} L</td></tr>
     <tr><th>Hasil Akhir</th><td>${log.yield_l != null ? fmtNum(log.yield_l) + " L" : "—"}</td></tr>
   </table>
   <h2>Kejadian Penting</h2>
@@ -445,13 +425,12 @@ onBeforeUnmount(() => clearInterval(timer));
             }}</b>
           </div>
           <div class="preview-row">
-            <span>Hasil vs Target</span
-            ><b
-              >{{ fmtNum(report.log?.estimated_yield) }} /
-              {{ fmtNum(report.batch.target_yield_l) }} L ({{
-                reportProgress
-              }}%)</b
-            >
+            <span>Hasil Estimasi</span
+            ><b>{{
+              report.log?.estimated_yield != null
+                ? fmtNum(report.log.estimated_yield) + " L"
+                : "—"
+            }}</b>
           </div>
           <div class="preview-row">
             <span>Suhu Puncak</span
@@ -537,15 +516,6 @@ onBeforeUnmount(() => clearInterval(timer));
             {{ estimatedYield !== null ? fmtNum(estimatedYield) : "—" }}
             <span class="yield-unit">Liter</span>
           </div>
-          <div class="yield-bar-wrap">
-            <div class="yield-bar">
-              <div
-                class="yield-fill"
-                :style="{ width: yieldProgress + '%' }"
-              ></div>
-            </div>
-          </div>
-          <div class="yield-pct">{{ yieldProgress }}% dari target</div>
         </div>
       </div>
     </div>
@@ -822,26 +792,6 @@ onBeforeUnmount(() => clearInterval(timer));
   font-weight: 500;
   color: var(--muted);
   margin-left: 4px;
-}
-.yield-bar-wrap {
-  margin-bottom: 6px;
-}
-.yield-bar {
-  height: 8px;
-  background: var(--line);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.yield-fill {
-  height: 100%;
-  background: var(--warn);
-  border-radius: 999px;
-  transition: width 0.5s;
-}
-.yield-pct {
-  font-size: 12px;
-  color: var(--muted);
-  text-align: right;
 }
 
 /* Power status card — dihapus bersama kartu STATUS LISTRIK */
