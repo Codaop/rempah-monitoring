@@ -213,7 +213,7 @@ async function loadBatches() {
   const { data } = await supabase
     .from("batches")
     .select(
-      "id, device_id, charge_mass_kg, target_yield_l, started_at, ended_at, status"
+      "id, device_id, charge_mass_kg, target_yield_l, estimated_finish_at, started_at, ended_at, status"
     )
     .order("started_at", { ascending: false })
     .limit(20);
@@ -298,6 +298,12 @@ function openReport(print) {
   const w = window.open("", "_blank", "width=820,height=900");
   if (!w) return;
   const batchId = `#${b.id.slice(0, 8).toUpperCase()}`;
+  const gasUsed =
+    log.gas_used_kg != null ? fmtNum(log.gas_used_kg) + " kg" : "—";
+  const gasDetail =
+    log.gas_start_kg != null && log.gas_end_kg != null
+      ? `(awal ${fmtNum(log.gas_start_kg)} kg → akhir ${fmtNum(log.gas_end_kg)} kg)`
+      : "";
   w.document
     .write(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
 <style>
@@ -317,7 +323,9 @@ function openReport(print) {
     <tr><th>Mulai</th><td>${b.started_at ? fmtDateTime(b.started_at) : "—"}</td></tr>
     <tr><th>Selesai</th><td>${b.ended_at ? fmtDateTime(b.ended_at) : "—"}</td></tr>
     <tr><th>Durasi</th><td>${durationMin != null ? fmtDuration(durationMin * 60) : "—"}</td></tr>
+    <tr><th>Perkiraan Selesai (Input Operator)</th><td>${b.estimated_finish_at ? fmtDateTime(b.estimated_finish_at) : "—"}</td></tr>
     <tr><th>Massa Muatan</th><td>${b.charge_mass_kg ? fmtNum(b.charge_mass_kg) + " kg" : "—"}</td></tr>
+    <tr><th>Penggunaan Gas</th><td>${gasUsed} ${gasDetail}</td></tr>
     <tr><th>Suhu Puncak</th><td>${log.peak_temp != null ? fmtNum(log.peak_temp) + " °C" : "—"}</td></tr>
     <tr><th>Hasil Estimasi vs Target</th><td>${fmtNum(est)} L / ${target ? fmtNum(target) + " L" : "—"} (${pct}%)</td></tr>
     <tr><th>Hasil Akhir</th><td>${log.yield_l != null ? fmtNum(log.yield_l) + " L" : "—"}</td></tr>
@@ -450,6 +458,14 @@ onBeforeUnmount(() => clearInterval(timer));
             ><b>{{
               report.log?.peak_temp != null
                 ? fmtNum(report.log.peak_temp) + " °C"
+                : "—"
+            }}</b>
+          </div>
+          <div class="preview-row">
+            <span>Penggunaan Gas</span
+            ><b>{{
+              report.log?.gas_used_kg != null
+                ? fmtNum(report.log.gas_used_kg) + " kg"
                 : "—"
             }}</b>
           </div>

@@ -11,14 +11,7 @@ const props = defineProps({
 });
 const emit = defineEmits(["command", "log", "created"]);
 
-// ── Progress batch ──────────────────────────────────────────────────────────
-const progress = computed(() => {
-  if (!props.batch || !props.log) return 0;
-  const target = Number(props.batch.target_yield_l);
-  const est = Number(props.log.estimated_yield);
-  if (!target) return 0;
-  return Math.min(100, Math.max(0, (est / target) * 100));
-});
+// ── Status batch ────────────────────────────────────────────────────────────
 
 const statusLabel = computed(() => {
   if (!props.batch) return null;
@@ -52,7 +45,7 @@ function fmtShortTime(iso) {
 const showForm = ref(false);
 const pickedId = ref("");
 const massKg = ref("");
-const targetL = ref("");
+const finishAt = ref("");
 const busy = ref(false);
 const note = ref("");
 const session = ref(null);
@@ -154,7 +147,9 @@ async function startBatch() {
       session_id: sess.id,
       device_id: d.id,
       charge_mass_kg: mass,
-      target_yield_l: targetL.value ? Number(targetL.value) : null,
+      estimated_finish_at: finishAt.value
+        ? new Date(finishAt.value).toISOString()
+        : null,
       status: "pending",
     });
     if (bErr) throw bErr;
@@ -198,13 +193,6 @@ async function startBatch() {
     </div>
 
     <template v-if="batch">
-      <div class="progress-row">
-        <div class="bar-track">
-          <div class="bar-fill" :style="{ width: progress + '%' }"></div>
-        </div>
-        <span class="progress-pct">{{ Math.round(progress) }}% Selesai</span>
-      </div>
-
       <div class="info-boxes">
         <div class="info-box">
           <div class="info-label">WAKTU MULAI</div>
@@ -214,9 +202,11 @@ async function startBatch() {
           <div class="info-label">WAKTU SELESAI (ESTIMASI)</div>
           <div class="info-val">
             {{
-              log?.estimated_finish_at
-                ? fmtShortTime(log.estimated_finish_at)
-                : "—"
+              batch.estimated_finish_at
+                ? fmtShortTime(batch.estimated_finish_at)
+                : log?.estimated_finish_at
+                  ? fmtShortTime(log.estimated_finish_at)
+                  : "—"
             }}
           </div>
         </div>
@@ -301,17 +291,14 @@ async function startBatch() {
     </div>
 
     <div class="form-row">
-      <label class="field-label" for="batch-target"
-        >Target Hasil (L, opsional)</label
+      <label class="field-label" for="batch-finish"
+        >Perkiraan Waktu Selesai (opsional)</label
       >
       <input
-        id="batch-target"
-        v-model="targetL"
+        id="batch-finish"
+        v-model="finishAt"
         class="input"
-        type="number"
-        min="0"
-        step="0.01"
-        placeholder="kosongkan bila belum tahu"
+        type="datetime-local"
       />
     </div>
 
@@ -358,36 +345,6 @@ async function startBatch() {
   background: var(--navy);
   color: #fff;
   letter-spacing: 0.05em;
-}
-
-.progress-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.bar-track {
-  flex: 1;
-  height: 10px;
-  background: var(--line);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  background: var(--teal);
-  border-radius: 999px;
-  transition: width 0.6s ease;
-}
-
-.progress-pct {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  white-space: nowrap;
-  flex: 0 0 auto;
 }
 
 .info-boxes {

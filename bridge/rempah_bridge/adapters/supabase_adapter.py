@@ -259,7 +259,7 @@ class SupabaseDbAdapter:
         # MAX/SUM dihitung di Python dari baris-baris sensor batch.
         rows = (
             self._client.table("sensor_logs")
-            .select("boiler_temp_c,drip_count")
+            .select("boiler_temp_c,drip_count,gas_mass_kg")
             .eq("batch_id", batch_id)
             .execute()
         )
@@ -268,6 +268,14 @@ class SupabaseDbAdapter:
         peak_temp = max(temps) if temps else 0.0
         total_drips = sum(drips)
         yield_l = round(total_drips * self._drip_ml / 1000, 4)
+        # Penggunaan gas (load cell): massa terakhir yang tercatat di awal vs akhir
+        # batch — selisihnya masuk laporan PDF (ticket 51).
+        gases = [float(r["gas_mass_kg"]) for r in (rows.data or []) if r.get("gas_mass_kg") is not None]
+        gas_start_kg = gases[0] if gases else None
+        gas_end_kg = gases[-1] if gases else None
+        gas_used_kg = None
+        if gas_start_kg is not None and gas_end_kg is not None:
+            gas_used_kg = round(max(0.0, gas_start_kg - gas_end_kg), 3)
         duration_s = 0.0
         try:
             start = datetime.fromisoformat(resp.data["started_at"].replace("Z", "+00:00"))
@@ -285,12 +293,15 @@ class SupabaseDbAdapter:
                 "peak_temp": peak_temp,
                 "duration": f"PT{int(duration_s)}S",  # interval (ISO 8601)
                 "yield_l": yield_l,
+                "gas_start_kg": gas_start_kg,
+                "gas_end_kg": gas_end_kg,
+                "gas_used_kg": gas_used_kg,
             },
             on_conflict="batch_id",
         ).execute()
         logger.info(
-            "batch %s closed: peak=%s°C duration=%ss yield=%sL",
-            batch_id[:8], peak_temp, duration_s, yield_l,
+            "batch %s closed: peak=%s°C duration=%ss yield=%sL gas_used=%skg",
+            batch_id[:8], peak_temp, duration_s, yield_l, gas_used_kg,
         )
 
     # ── Retention ────────────────────────────────────────────────────────────

@@ -74,9 +74,15 @@ class FakeQuery:
 
 
 class FakeClient:
-    def __init__(self, batch_rows: Optional[list] = None, device_rows: Optional[list] = None) -> None:
+    def __init__(
+        self,
+        batch_rows: Optional[list] = None,
+        device_rows: Optional[list] = None,
+        sensor_rows: Optional[list] = None,
+    ) -> None:
         self._batch_rows = batch_rows or []
         self._device_rows = device_rows or []
+        self._sensor_rows = sensor_rows or []
         self.tables: dict[str, FakeQuery] = {}
 
     def table(self, name: str) -> FakeQuery:
@@ -85,13 +91,15 @@ class FakeClient:
                 self.tables[name] = FakeQuery(self._batch_rows, null_on_empty=True)
             elif name == "devices":
                 self.tables[name] = FakeQuery(self._device_rows, null_on_empty=True)
+            elif name == "sensor_logs":
+                self.tables[name] = FakeQuery(self._sensor_rows, null_on_empty=True)
             else:
                 self.tables[name] = FakeQuery(null_on_empty=True)
         return self.tables[name]
 
 
-def _adapter(batch_rows=None, device_rows=None) -> tuple[SupabaseDbAdapter, FakeClient]:
-    client = FakeClient(batch_rows=batch_rows, device_rows=device_rows)
+def _adapter(batch_rows=None, device_rows=None, sensor_rows=None) -> tuple[SupabaseDbAdapter, FakeClient]:
+    client = FakeClient(batch_rows=batch_rows, device_rows=device_rows, sensor_rows=sensor_rows)
     adapter = SupabaseDbAdapter(client)
     return adapter, client
 
@@ -169,3 +177,56 @@ def test_close_active_batch_handles_missing_row() -> None:
     adapter.close_active_batch("d1", "2026-08-13T10:00:00Z")
 
     assert True  # sampai di sini tanpa exception sudah cukup
+
+
+def test_close_active_batch_records_gas_usage() -> None:
+    """Penggunaan gas dihitung dari selisih massa awal vs akhir batch (ticket 51)."""
+    adapter, client = _adapter(
+        batch_rows=[
+            {
+                "id": "b1",
+                "started_at": "2026-08-13T10:00:00Z",
+                "charge_mass_kg": 5.0,
+            }
+        ],
+        device_rows=[{"id": "d1", "producer_id": "p1"}],
+        sensor_rows=[
+            {"boiler_temp_c": 90.0, "drip_count": 2, "gas_mass_kg": 28.6},
+            {"boiler_temp_c": 95.0, "drip_count": 3, "gas_mass_kg": 28.1},
+            {"boiler_temp_c": 97.0, "drip_count": 4, "gas_mass_kg": 27.9},
+        ],
+    )
+
+    adapter.close_active_batch("d1", "2026-08-13T11:00:00Z")
+
+    log = client.tables["batch_logs"].inserted
+    assert log is not None
+    assert log["gas_start_kg"] == 28.6
+    assert log["gas_end_kg"] == 27.9
+    assert log["gas_used_kg"] == round(28.6 - 27.9, 3)
+
+
+def test_close_active_batch_gas_usage_none_when_no_gas_data() -> None:
+    """Tanpa data gas di sensor_logs, kolom gas di batch_logs bernilai None."""
+    adapter, client = _adapter(
+        batch_rows=[
+            {
+                "id": "b2",
+                "started_at": "2026-08-13T10:00:00Z",
+                "charge_mass_kg": 5.0,
+            }
+        ],
+        device_rows=[{"id": "d1", "producer_id": "p1"}],
+        sensor_rows=[
+            {"boiler_temp_c": 90.0, "drip_count": 2, "gas_mass_kg": None},
+            {"boiler_temp_c": 95.0, "drip_count": 3, "gas_mass_kg": None},
+        ],
+    )
+
+    adapter.close_active_batch("d1", "2026-08-13T11:00:00Z")
+
+    log = client.tables["batch_logs"].inserted
+    assert log is not None
+    assert log["gas_start_kg"] is None
+    assert log["gas_end_kg"] is None
+    assert log["gas_used_kg"] is None
