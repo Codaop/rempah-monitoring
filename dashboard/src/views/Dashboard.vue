@@ -58,9 +58,6 @@ const sparkGas = computed(() =>
 const sparkCooling = computed(() =>
   deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.cooling_temp_c)
 );
-const sparkYield = computed(() =>
-  batchLog.value && batch.value ? [batchLog.value.estimated_yield || 0] : [0]
-);
 
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -454,7 +451,7 @@ async function refreshState() {
         Nilai real-time dari perangkat — belum ada batch aktif.
       </div>
 
-      <!-- 4 Metric Cards -->
+      <!-- 3 Metric Cards -->
       <div class="grid-cards">
         <MetricCard
           label="SUHU BOILER"
@@ -526,29 +523,6 @@ async function refreshState() {
               <path
                 d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"
               />
-            </svg>
-          </template>
-        </MetricCard>
-
-        <MetricCard
-          label="PERKIRAAN HASIL"
-          :value="batch ? fmtNum(batchLog?.estimated_yield) : '—'"
-          unit="L"
-          :data="sparkYield"
-          color="#a07840"
-        >
-          <template #icon>
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            >
-              <path d="M6 2v6l-2 4a6 6 0 0 0 6 8h4a6 6 0 0 0 6-8l-2-4V2" />
-              <line x1="6" y1="8" x2="18" y2="8" />
             </svg>
           </template>
         </MetricCard>
@@ -667,7 +641,7 @@ async function refreshState() {
 
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
   margin-bottom: 16px;
 }

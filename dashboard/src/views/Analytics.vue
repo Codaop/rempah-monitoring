@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import AppShell from "../components/AppShell.vue";
+import AppModal from "../components/AppModal.vue";
 import { supabase } from "../lib/supabase";
 import { fmtNum, fmtDateTime, fmtTime, offlineSince } from "../lib/format";
 
@@ -12,6 +13,13 @@ const snapshot = ref(null);
 const batchOptions = ref([]);
 const selectedBatchId = ref(null);
 const report = ref(null);
+
+// ── Modal rendemen (ticket 55) ──────────────────────────────────────────────
+// Wajib diisi saat batch selesai: volume minyak atsiri hasil distilasi (ml).
+const showYieldModal = ref(false);
+const yieldVolume = ref("");
+const yieldBusy = ref(false);
+const yieldError = ref("");
 
 const filters = [
   { value: "semua", label: "Semua" },
@@ -149,10 +157,6 @@ async function loadSnapshot() {
   };
 }
 
-const estimatedYield = computed(
-  () => snapshot.value?.batchLog?.estimated_yield || null
-);
-
 // Status online/offline jujur dari last_seen_at per perangkat (threshold 60s,
 // konsisten dengan OFFLINE_AFTER_S bridge dan dashboard).
 const OFFLINE_MS = 60000;
@@ -195,7 +199,7 @@ async function loadBatches() {
   const { data } = await supabase
     .from("batches")
     .select(
-      "id, device_id, charge_mass_kg, target_yield_l, estimated_finish_at, started_at, ended_at, status"
+      "id, producer_id, device_id, charge_mass_kg, target_yield_l, estimated_finish_at, started_at, ended_at, status"
     )
     .order("started_at", { ascending: false })
     .limit(20);
@@ -210,7 +214,7 @@ async function loadBatchReport() {
     report.value = null;
     return;
   }
-  const [batchLogRes, cmdRes, alertRes] = await Promise.all([
+  const [batchLogRes, cmdRes, sensorRes] = await Promise.all([
     supabase.from("batch_logs").select("*").eq("batch_id", b.id).maybeSingle(),
     supabase
       .from("commands")
@@ -219,47 +223,141 @@ async function loadBatchReport() {
       .order("created_at", { ascending: false })
       .limit(20),
     supabase
-      .from("alerts")
-      .select("*")
-      .eq("device_id", b.device_id)
+      .from("sensor_logs")
+      .select("ts, boiler_temp_c, gas_mass_kg")
+      .eq("batch_id", b.id)
       .order("ts", { ascending: false })
-      .limit(20),
+      .limit(5000),
   ]);
+  const sensorRows = sensorRes.data || [];
+  // Suhu puncak dihitung dari data sensor aktual batch (bukan hanya nilai
+  // yang disimpan batch_logs) — jaminan angka tertinggi yang benar (ticket 53).
+  const temps = sensorRows
+    .map((r) => Number(r.boiler_temp_c))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  const peakTemp = temps.length ? Math.max(...temps) : null;
   report.value = {
     batch: b,
     log: batchLogRes.data,
+    peakTemp,
+    sensorRows,
     commands: (cmdRes.data || []).filter((c) =>
       windowWithin(c.created_at, b.started_at, b.ended_at)
     ),
-    alerts: (alertRes.data || []).filter((a) =>
-      windowWithin(a.ts, b.started_at, b.ended_at)
-    ),
   };
+  // Ticket 55: batch selesai & volume hasil belum tercatat → modal wajib.
+  maybeOpenYieldModal(report.value);
+}
+
+// ── Modal rendemen (ticket 55) ──────────────────────────────────────────────
+function maybeOpenYieldModal(r) {
+  if (!r || !r.batch) return;
+  const completed = r.batch.status === "completed";
+  const recorded = r.log?.oil_volume_ml != null;
+  if (completed && !recorded && !yieldBusy.value) {
+    yieldVolume.value = "";
+    yieldError.value = "";
+    showYieldModal.value = true;
+  }
+}
+
+function closeYieldModal() {
+  if (yieldBusy.value) return;
+  showYieldModal.value = false;
+}
+
+async function submitYield() {
+  const r = report.value;
+  if (!r || !r.batch || yieldBusy.value) return;
+  const vol = Number(yieldVolume.value);
+  if (!Number.isFinite(vol) || vol <= 0) {
+    yieldError.value = "Volume minyak harus diisi dan lebih dari 0.";
+    return;
+  }
+  const chargeKg = Number(r.batch.charge_mass_kg);
+  if (!Number.isFinite(chargeKg) || chargeKg <= 0) {
+    yieldError.value = "Berat bahan baku batch tidak valid (0/kosong).";
+    return;
+  }
+  yieldBusy.value = true;
+  yieldError.value = "";
+  try {
+    // Rendemen = volume minyak (ml) / berat bahan baku (kg) → ml/kg
+    const rendemen = vol / chargeKg;
+    const { error } = await supabase.from("batch_logs").upsert(
+      {
+        batch_id: r.batch.id,
+        producer_id: r.batch.producer_id,
+        oil_volume_ml: vol,
+        yield_rendemen_ml_per_kg: rendemen,
+        yield_recorded_at: new Date().toISOString(),
+      },
+      { onConflict: "batch_id" }
+    );
+    if (error) throw error;
+    showYieldModal.value = false;
+    await loadBatchReport();
+  } catch (e) {
+    yieldError.value = `Gagal menyimpan: ${e.message}`;
+  } finally {
+    yieldBusy.value = false;
+  }
 }
 
 watch(selectedBatchId, loadBatchReport);
 
 function fmtDuration(sec) {
-  const mins = Math.max(1, Math.round(Number(sec) / 60));
+  const s = Math.max(1, Math.round(Number(sec)));
+  const mins = Math.round(s / 60);
   if (mins < 60) return `${mins} menit`;
   const h = Math.floor(mins / 60);
   return `${h} jam ${mins % 60} menit`;
 }
 
+// Durasi batch dalam detik, dihitung langsung dari selesai − mulai.
+// Fallback ke interval ISO ("PT{n}S") dari batch_logs bila timestamp tidak lengkap.
+function batchDurationSec(b, log) {
+  if (b.started_at && b.ended_at) {
+    const ms =
+      new Date(b.ended_at).getTime() - new Date(b.started_at).getTime();
+    if (Number.isFinite(ms) && ms > 0) return ms / 1000;
+  }
+  const iso = log?.duration;
+  if (typeof iso === "string" && iso.startsWith("PT")) {
+    const sec = Number(iso.slice(2, -1));
+    if (Number.isFinite(sec) && sec > 0) return sec;
+  }
+  return null;
+}
+
 function batchEventsHtml(r) {
-  const rowsHtml = [
-    ...r.commands.map(
-      (c) =>
-        `<tr><td>${fmtDateTime(c.created_at)}</td><td>Perintah ${c.action}</td><td>${c.expected_state || "—"}</td><td>${c.status}</td></tr>`
-    ),
-    ...r.alerts.map(
-      (a) =>
-        `<tr><td>${fmtDateTime(a.ts)}</td><td>Alert ${a.kind}</td><td>${fmtNum(a.value)}</td><td>DANGER</td></tr>`
-    ),
-  ].join("");
+  const rowsHtml = [];
+  // Log sensor — konsisten dengan tabel "Log Sistem" di halaman.
+  const sensorSample = (r.sensorRows || []).slice(0, 100);
+  for (const s of sensorSample) {
+    const temp = Number(s.boiler_temp_c);
+    if (Number.isFinite(temp)) {
+      const warn = temp > 98 ? "DANGER" : temp > 92 ? "WARNING" : "OK";
+      rowsHtml.push(
+        `<tr><td>${fmtDateTime(s.ts)}</td><td>Lonjakan Suhu Boiler</td><td>${fmtNum(temp)} °C</td><td>${warn}</td></tr>`
+      );
+    }
+    const gas = Number(s.gas_mass_kg);
+    if (Number.isFinite(gas)) {
+      rowsHtml.push(
+        `<tr><td>${fmtDateTime(s.ts)}</td><td>Massa Gas</td><td>${fmtNum(gas)} kg</td><td>${gas < 15 ? "DANGER" : "OK"}</td></tr>`
+      );
+    }
+  }
+  // Log perintah — dalam jendela batch (ticket 54).
+  for (const c of r.commands || []) {
+    rowsHtml.push(
+      `<tr><td>${fmtDateTime(c.created_at)}</td><td>Perintah ${c.action}</td><td>${c.expected_state || "—"}</td><td>${c.status}</td></tr>`
+    );
+  }
   return (
-    rowsHtml ||
-    `<tr><td colspan="4">Tidak ada kejadian tercatat untuk batch ini.</td></tr>`
+    rowsHtml.join("") ||
+    `<tr><td colspan="4">Tidak ada log sistem untuk batch ini.</td></tr>`
   );
 }
 
@@ -268,13 +366,8 @@ function openReport(print) {
   if (!r) return;
   const b = r.batch;
   const log = r.log || {};
-  const est = Number(log.estimated_yield) || 0;
-  const durationMin =
-    log.duration != null
-      ? Math.round(Number(log.duration) / 60)
-      : b.started_at && b.ended_at
-        ? Math.round((new Date(b.ended_at) - new Date(b.started_at)) / 60000)
-        : null;
+  const durationSec = batchDurationSec(b, log);
+  const peakTemp = r.peakTemp ?? log.peak_temp;
   const w = window.open("", "_blank", "width=820,height=900");
   if (!w) return;
   const batchId = `#${b.id.slice(0, 8).toUpperCase()}`;
@@ -284,6 +377,20 @@ function openReport(print) {
     log.gas_start_kg != null && log.gas_end_kg != null
       ? `(awal ${fmtNum(log.gas_start_kg)} kg → akhir ${fmtNum(log.gas_end_kg)} kg)`
       : "";
+  // Tanggal "Dibuat" = waktu batch selesai (laporan akhir tercatat), bukan
+  // waktu preview/download. batch_logs.created_at tidak dipakai karena bisa
+  // terbentuk sejak batch dibuka (upsert awal saat batch berjalan).
+  const createdLabel = b.ended_at
+    ? fmtDateTime(b.ended_at)
+    : log.created_at
+      ? fmtDateTime(log.created_at)
+      : fmtDateTime(new Date());
+  const oilVolume =
+    log.oil_volume_ml != null ? fmtNum(log.oil_volume_ml) + " ml" : "—";
+  const rendemen =
+    log.yield_rendemen_ml_per_kg != null
+      ? fmtNum(log.yield_rendemen_ml_per_kg) + " ml/kg"
+      : "—";
   w.document
     .write(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
 <style>
@@ -297,21 +404,21 @@ function openReport(print) {
   @media print{body{padding:16px;}}
 </style></head><body>
   <h1>REMPAH — Laporan Batch</h1>
-  <div class="sub">${batchId} — ${deviceNameOf(b.device_id)} · Dibuat: ${fmtDateTime(new Date())} · Status: ${b.status.toUpperCase()}</div>
+  <div class="sub">${batchId} — ${deviceNameOf(b.device_id)} · Dibuat: ${createdLabel} · Status: ${b.status.toUpperCase()}</div>
   <h2>Identitas &amp; Ringkasan</h2>
   <table>
     <tr><th>Mulai</th><td>${b.started_at ? fmtDateTime(b.started_at) : "—"}</td></tr>
-    <tr><th>Selesai</th><td>${b.ended_at ? fmtDateTime(b.ended_at) : "—"}</td></tr>
-    <tr><th>Durasi</th><td>${durationMin != null ? fmtDuration(durationMin * 60) : "—"}</td></tr>
+    <tr><th>Selesai</th><td>${b.ended_at ? fmtDateTime(b.ended_at) : b.status === "active" ? "Masih berjalan" : "—"}</td></tr>
+    <tr><th>Durasi</th><td>${durationSec != null ? fmtDuration(durationSec) : "—"}</td></tr>
     <tr><th>Perkiraan Selesai (Input Operator)</th><td>${b.estimated_finish_at ? fmtDateTime(b.estimated_finish_at) : "—"}</td></tr>
     <tr><th>Massa Muatan</th><td>${b.charge_mass_kg ? fmtNum(b.charge_mass_kg) + " kg" : "—"}</td></tr>
     <tr><th>Penggunaan Gas</th><td>${gasUsed} ${gasDetail}</td></tr>
-    <tr><th>Suhu Puncak</th><td>${log.peak_temp != null ? fmtNum(log.peak_temp) + " °C" : "—"}</td></tr>
-    <tr><th>Hasil Estimasi</th><td>${fmtNum(est)} L</td></tr>
-    <tr><th>Hasil Akhir</th><td>${log.yield_l != null ? fmtNum(log.yield_l) + " L" : "—"}</td></tr>
+    <tr><th>Suhu Puncak</th><td>${peakTemp != null ? fmtNum(peakTemp) + " °C" : "—"}</td></tr>
+    <tr><th>Volume Hasil Minyak</th><td>${oilVolume}</td></tr>
+    <tr><th>Rendemen</th><td>${rendemen}</td></tr>
   </table>
-  <h2>Kejadian Penting</h2>
-  <table><thead><tr><th>CAPTIME</th><th>KEJADIAN &amp; SENSOR</th><th>NILAI</th><th>STATUS</th></tr></thead><tbody>${batchEventsHtml(r)}</tbody></table>
+  <h2>Log Sistem</h2>
+  <table><thead><tr><th>CAPTIME</th><th>LOG</th><th>NILAI</th><th>STATUS</th></tr></thead><tbody>${batchEventsHtml(r)}</tbody></table>
   <script>${print ? "window.onload=function(){setTimeout(function(){window.print()},400)}" : ""}<\/script>
 </body></html>`);
   w.document.close();
@@ -425,18 +532,10 @@ onBeforeUnmount(() => clearInterval(timer));
             }}</b>
           </div>
           <div class="preview-row">
-            <span>Hasil Estimasi</span
-            ><b>{{
-              report.log?.estimated_yield != null
-                ? fmtNum(report.log.estimated_yield) + " L"
-                : "—"
-            }}</b>
-          </div>
-          <div class="preview-row">
             <span>Suhu Puncak</span
             ><b>{{
-              report.log?.peak_temp != null
-                ? fmtNum(report.log.peak_temp) + " °C"
+              (report.peakTemp ?? report.log?.peak_temp) != null
+                ? fmtNum(report.peakTemp ?? report.log?.peak_temp) + " °C"
                 : "—"
             }}</b>
           </div>
@@ -445,6 +544,22 @@ onBeforeUnmount(() => clearInterval(timer));
             ><b>{{
               report.log?.gas_used_kg != null
                 ? fmtNum(report.log.gas_used_kg) + " kg"
+                : "—"
+            }}</b>
+          </div>
+          <div class="preview-row">
+            <span>Volume Hasil Minyak</span
+            ><b>{{
+              report.log?.oil_volume_ml != null
+                ? fmtNum(report.log.oil_volume_ml) + " ml"
+                : "—"
+            }}</b>
+          </div>
+          <div class="preview-row">
+            <span>Rendemen</span
+            ><b>{{
+              report.log?.yield_rendemen_ml_per_kg != null
+                ? fmtNum(report.log.yield_rendemen_ml_per_kg) + " ml/kg"
                 : "—"
             }}</b>
           </div>
@@ -489,33 +604,6 @@ onBeforeUnmount(() => clearInterval(timer));
             </svg>
             Unduh PDF
           </button>
-        </div>
-      </div>
-
-      <!-- Right: Hasil -->
-      <div class="right-col">
-        <div class="card yield-card">
-          <div class="yield-header">
-            <div class="yield-icon">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#a07840"
-                stroke-width="1.8"
-                stroke-linecap="round"
-              >
-                <path d="M6 2v6l-2 4a6 6 0 0 0 6 8h4a6 6 0 0 0 6-8l-2-4V2" />
-                <line x1="6" y1="8" x2="18" y2="8" />
-              </svg>
-            </div>
-            <span class="yield-label">HASIL YANG DIPERKIRAKAN</span>
-          </div>
-          <div class="yield-value">
-            {{ estimatedYield !== null ? fmtNum(estimatedYield) : "—" }}
-            <span class="yield-unit">Liter</span>
-          </div>
         </div>
       </div>
     </div>
@@ -603,6 +691,51 @@ onBeforeUnmount(() => clearInterval(timer));
         <p v-else class="muted">Memuat log…</p>
       </div>
     </div>
+
+    <!-- Modal rendemen — wajib saat batch selesai (ticket 55) -->
+    <AppModal
+      :open="showYieldModal"
+      title="Catat Volume Hasil Minyak"
+      @close="closeYieldModal"
+    >
+      <p class="muted modal-sub">
+        Batch
+        {{
+          report?.batch ? "#" + report.batch.id.slice(0, 8).toUpperCase() : ""
+        }}
+        telah selesai. Isi volume minyak atsiri hasil distilasi (diukur dengan
+        gelas ukur).
+      </p>
+      <div class="form-row">
+        <label class="field-label" for="yield-volume"
+          >Volume Hasil Minyak (ml) — wajib</label
+        >
+        <input
+          id="yield-volume"
+          v-model="yieldVolume"
+          class="input"
+          type="number"
+          min="0"
+          step="0.1"
+          placeholder="contoh: 150"
+          autofocus
+        />
+      </div>
+      <p v-if="report?.batch?.charge_mass_kg" class="muted calc-hint">
+        Berat bahan baku: {{ fmtNum(report.batch.charge_mass_kg) }} kg —
+        rendemen = volume (ml) ÷ berat (kg)
+      </p>
+      <p v-if="yieldError" class="note note-err">{{ yieldError }}</p>
+      <template #actions>
+        <button
+          class="btn btn-primary"
+          :disabled="yieldBusy"
+          @click="submitYield"
+        >
+          {{ yieldBusy ? "Menyimpan…" : "Simpan" }}
+        </button>
+      </template>
+    </AppModal>
   </AppShell>
 </template>
 
@@ -660,15 +793,9 @@ onBeforeUnmount(() => clearInterval(timer));
 /* Top grid */
 .top-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 16px;
   margin-bottom: 16px;
-}
-
-@media (max-width: 900px) {
-  .top-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Report card */
@@ -750,50 +877,6 @@ onBeforeUnmount(() => clearInterval(timer));
   padding: 11px;
 }
 
-/* Right column */
-.right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* Yield card */
-.yield-card {
-}
-.yield-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.yield-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: #f5ecd7;
-  display: grid;
-  place-items: center;
-}
-.yield-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-.yield-value {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--navy);
-  margin-bottom: 10px;
-}
-.yield-unit {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--muted);
-  margin-left: 4px;
-}
-
 /* Power status card — dihapus bersama kartu STATUS LISTRIK */
 
 /* Log section */
@@ -870,5 +953,36 @@ onBeforeUnmount(() => clearInterval(timer));
   border-radius: 2px;
   flex: 0 0 3px;
   margin-top: 2px;
+}
+
+/* Modal rendemen (ticket 55) */
+.modal-sub {
+  margin: 0 0 14px;
+}
+.form-row {
+  margin-bottom: 12px;
+}
+.field-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.calc-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.note {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: #fdf7e0;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 4px 0 0;
+}
+.note-err {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 </style>
