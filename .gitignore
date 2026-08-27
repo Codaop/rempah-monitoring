@@ -23,3 +23,7 @@ venv/
 *.log
 *.key
 supabase/.env
+
+# Non-related file
+*.ino
+nul
