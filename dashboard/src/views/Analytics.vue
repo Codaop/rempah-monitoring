@@ -21,6 +21,13 @@ const yieldVolume = ref("");
 const yieldBusy = ref(false);
 const yieldError = ref("");
 
+// ── Pratinjau/unduh laporan in-app ──────────────────────────────────────────
+// Fallback saat popup diblokir browser: tampilkan HTML laporan di iframe
+// dalam modal, cetak/unduh lewat tombol aksi (tidak bergantung window.open).
+const showReportModal = ref(false);
+const reportHtml = ref("");
+const reportFrame = ref(null);
+
 const filters = [
   { value: "semua", label: "Semua" },
   { value: "sensor", label: "Sensor" },
@@ -361,15 +368,11 @@ function batchEventsHtml(r) {
   );
 }
 
-function openReport(print) {
-  const r = report.value;
-  if (!r) return;
+function buildReportHtml(r, print) {
   const b = r.batch;
   const log = r.log || {};
   const durationSec = batchDurationSec(b, log);
   const peakTemp = r.peakTemp ?? log.peak_temp;
-  const w = window.open("", "_blank", "width=820,height=900");
-  if (!w) return;
   const batchId = `#${b.id.slice(0, 8).toUpperCase()}`;
   const gasUsed =
     log.gas_used_kg != null ? fmtNum(log.gas_used_kg) + " kg" : "—";
@@ -391,8 +394,7 @@ function openReport(print) {
     log.yield_rendemen_ml_per_kg != null
       ? fmtNum(log.yield_rendemen_ml_per_kg) + " ml/kg"
       : "—";
-  w.document
-    .write(`<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
+  return `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
 <style>
   body{font-family:system-ui,Segoe UI,sans-serif;color:#1c2b3a;padding:32px;}
   h1{font-size:22px;margin:0 0 4px;} .sub{color:#64748b;margin-bottom:20px;font-size:13px;}
@@ -420,8 +422,27 @@ function openReport(print) {
   <h2>Log Sistem</h2>
   <table><thead><tr><th>CAPTIME</th><th>LOG</th><th>NILAI</th><th>STATUS</th></tr></thead><tbody>${batchEventsHtml(r)}</tbody></table>
   <script>${print ? "window.onload=function(){setTimeout(function(){window.print()},400)}" : ""}<\/script>
-</body></html>`);
-  w.document.close();
+</body></html>`;
+}
+
+function openReport(print) {
+  const r = report.value;
+  if (!r) return;
+  const html = buildReportHtml(r, print);
+  // Prefer popup (perilaku lama); jika diblokir popup blocker → fallback
+  // pratinjau in-app lewat iframe di modal agar tombol selalu berfungsi.
+  const w = window.open("", "_blank", "width=820,height=900");
+  if (w) {
+    w.document.write(html);
+    w.document.close();
+    return;
+  }
+  reportHtml.value = html;
+  showReportModal.value = true;
+}
+
+function printReportFromModal() {
+  reportFrame.value?.contentWindow?.print();
 }
 
 onMounted(async () => {
@@ -736,6 +757,29 @@ onBeforeUnmount(() => clearInterval(timer));
         </button>
       </template>
     </AppModal>
+
+    <!-- Pratinjau laporan in-app — fallback saat popup diblokir browser -->
+    <AppModal
+      :open="showReportModal"
+      title="Pratinjau Laporan Batch"
+      maxWidth="860px"
+      @close="showReportModal = false"
+    >
+      <iframe
+        ref="reportFrame"
+        :srcdoc="reportHtml"
+        class="report-frame"
+        title="Laporan Batch REMPAH"
+      ></iframe>
+      <template #actions>
+        <button class="btn btn-ghost" @click="showReportModal = false">
+          Tutup
+        </button>
+        <button class="btn btn-primary" @click="printReportFromModal">
+          Cetak / Unduh PDF
+        </button>
+      </template>
+    </AppModal>
   </AppShell>
 </template>
 
@@ -875,6 +919,16 @@ onBeforeUnmount(() => clearInterval(timer));
   justify-content: center;
   gap: 7px;
   padding: 11px;
+}
+
+/* Frame pratinjau laporan in-app (fallback popup) */
+.report-frame {
+  width: 100%;
+  height: 68vh;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
 }
 
 /* Power status card — dihapus bersama kartu STATUS LISTRIK */
