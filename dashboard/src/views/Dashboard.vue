@@ -21,6 +21,7 @@ import {
   connectMqtt,
   disconnectMqtt,
   setAllowedDevices,
+  seedDrips,
 } from "../lib/mqtt";
 import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
@@ -42,6 +43,33 @@ const commandStatusCache = new Map(); // command_id → status terakhir (dedupe)
 
 const selectedDevice = computed(() => devices.value[selectedIdx.value] || null);
 const activeDeviceId = computed(() => selectedDevice.value?.id || null);
+
+// ── Penghitung tetesan (card TOTAL TETESAN) ────────────────────────────────
+// Nilai kumulatif batch aktif: di-seed dari Supabase (sum drip_count batch),
+// lalu di-inkremen live — dari pesan MQTT saat terhubung, atau dari Realtime
+// INSERT saat MQTT mati (jangan dua-duanya agar tidak dobel hitung).
+const dripDbTotal = ref(null); // jalur DB (fallback / seed)
+const batchDeviceId = computed(() => batch.value?.device_id || null);
+const batchLiveEntry = computed(() =>
+  batchDeviceId.value ? liveByDevice[batchDeviceId.value] : null
+);
+const dripValue = computed(() => {
+  if (!batch.value) return "—";
+  if (mqttStatus.value === "connected") {
+    const e = batchLiveEntry.value;
+    if (e && e.total_drips != null) return fmtNum(e.total_drips, 0);
+  }
+  return dripDbTotal.value != null ? fmtNum(dripDbTotal.value, 0) : "—";
+});
+const sparkDrips = computed(() => {
+  if (mqttStatus.value === "connected") {
+    const s = batchLiveEntry.value?.sparks?.drip_count;
+    if (s && s.length) return s;
+  }
+  return deviceHistory.value
+    .slice(-SPARK_POINTS)
+    .map((r) => Number(r.drip_count) || 0);
+});
 
 // Riwayat & metrik mengikuti perangkat terpilih (ticket 37) — setiap still
 // menampilkan datanya sendiri tanpa tercampur device lain.
@@ -239,6 +267,24 @@ async function loadAll() {
   } else {
     batchLog.value = null;
   }
+
+  // Seed penghitung tetesan: sum drip_count batch aktif dari Supabase.
+  // Menjadi nilai awal jalur DB (fallback) sekaligus seed store MQTT
+  // (seedDrips) — dipanggil sebelum connectMqtt di onMounted, jadi delta
+  // live MQTT selalu diakumulasi di atas seed ini tanpa dobel hitung.
+  dripDbTotal.value = null;
+  if (batch.value) {
+    const { data: drips } = await supabase
+      .from("sensor_logs")
+      .select("drip_count")
+      .eq("batch_id", batch.value.id);
+    const total = (drips || []).reduce(
+      (s, r) => s + (Number(r.drip_count) || 0),
+      0
+    );
+    dripDbTotal.value = total;
+    seedDrips(batch.value.device_id, total);
+  }
   history.value = (histRes.data || []).reverse();
   loading.value = false;
 
@@ -292,6 +338,12 @@ onMounted(async () => {
       { event: "INSERT", schema: "public", table: "sensor_logs" },
       (payload) => {
         const row = payload.new;
+        // Akumulasi tetesan via Realtime HANYA saat MQTT mati — saat MQTT
+        // terhubung delta sudah dihitung dari pesan langsung (hindari dobel).
+        if (mqttStatus.value !== "connected") {
+          dripDbTotal.value =
+            (dripDbTotal.value || 0) + (Number(row.drip_count) || 0);
+        }
         if (activeDeviceId.value && row.device_id === activeDeviceId.value) {
           const seen = history.value.some((r) => r.id === row.id);
           if (!seen) {
@@ -520,7 +572,7 @@ async function refreshState() {
         Nilai real-time dari perangkat — belum ada batch aktif.
       </div>
 
-      <!-- 3 Metric Cards -->
+      <!-- 4 Metric Cards -->
       <div class="grid-cards">
         <MetricCard
           label="SUHU BOILER"
@@ -592,6 +644,30 @@ async function refreshState() {
               <path
                 d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"
               />
+            </svg>
+          </template>
+        </MetricCard>
+
+        <MetricCard
+          label="TOTAL TETESAN"
+          :value="dripValue"
+          unit="tetes"
+          :data="sparkDrips"
+          color="#3a7ca5"
+          :hint="batch ? 'Kumulatif batch aktif' : 'Menunggu batch aktif'"
+        >
+          <template #icon>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
             </svg>
           </template>
         </MetricCard>
@@ -713,7 +789,7 @@ async function refreshState() {
 
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   margin-bottom: 16px;
 }

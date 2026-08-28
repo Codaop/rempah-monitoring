@@ -18,8 +18,9 @@ export const mqttError = ref("");
 // Live store per device_id:
 // {
 //   device_id, received_at (Date.now browser), mode (dari state),
+//   total_drips (kumulatif, di-seed dari Supabase + delta live MQTT),
 //   telemetry: { boiler_temp_c, cooling_temp_c, gas_mass_kg, water_level, drip_count, flame_lit },
-//   sparks: { boiler_temp_c: [], cooling_temp_c: [], gas_mass_kg: [] }  // ring buffer
+//   sparks: { boiler_temp_c: [], cooling_temp_c: [], gas_mass_kg: [], drip_count: [] }  // ring buffer
 // }
 export const liveByDevice = reactive({});
 
@@ -42,11 +43,13 @@ function ensureEntry(deviceId) {
       received_at: 0,
       mode: null,
       cause: null,
+      total_drips: 0,
       telemetry: {},
       sparks: {
         boiler_temp_c: [],
         cooling_temp_c: [],
         gas_mass_kg: [],
+        drip_count: [],
       },
     };
   }
@@ -63,8 +66,18 @@ function applyTelemetry(entry, msg) {
     }
   }
   if (msg.water_level !== undefined) t.water_level = Number(msg.water_level);
-  if (msg.drip_count !== undefined) t.drip_count = Number(msg.drip_count);
   if (msg.flame_lit !== undefined) t.flame_lit = Boolean(msg.flame_lit);
+  // Penghitung tetesan (card TOTAL TETESAN). Firmware mengirim drip_count
+  // sebagai delta per interval 5 detik — akumulasi di sini di atas seed dari
+  // Supabase (seedDrips) agar total kumulatif bertahan melewati reload.
+  if (msg.drip_count !== undefined) {
+    const n = Number(msg.drip_count);
+    if (Number.isFinite(n) && n > 0) {
+      t.drip_count = n;
+      entry.total_drips = (entry.total_drips || 0) + n;
+      pushSpark(entry.sparks.drip_count, n);
+    }
+  }
   entry.received_at = Date.now();
 }
 
@@ -102,6 +115,14 @@ export function setAllowedDevices(deviceIds = []) {
   for (const id of deviceIds) {
     if (id) allowedDeviceIds.add(id);
   }
+}
+
+// Seed penghitung tetesan dari Supabase (sum drip_count batch aktif) agar
+// nilai kumulatif bertahan melewati reload. Dipanggil dashboard saat loadAll
+// SEBELUM connectMqtt — delta live lalu diakumulasi di atas seed ini.
+export function seedDrips(deviceId, total) {
+  const entry = ensureEntry(deviceId);
+  entry.total_drips = Number(total) || 0;
 }
 
 export function connectMqtt(deviceIds = []) {
