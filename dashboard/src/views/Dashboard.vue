@@ -25,9 +25,9 @@ import {
 } from "../lib/mqtt";
 import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
-// Auto-refresh penuh tiap 5 detik — data realtime (MQTT/Realtime) digabung
+// Auto-refresh penuh tiap 10 detik — data realtime (MQTT/Realtime) digabung
 // sinkronisasi state Supabase secara berkala agar device/batch selalu segar.
-const REFRESH_MS = 5000;
+const REFRESH_MS = 10000;
 const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const route = useRoute();
 const batchPanel = ref(null);
