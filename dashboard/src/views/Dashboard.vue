@@ -25,7 +25,9 @@ import {
 } from "../lib/mqtt";
 import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
-const REFRESH_MS = 30000;
+// Auto-refresh penuh tiap 5 detik — data realtime (MQTT/Realtime) digabung
+// sinkronisasi state Supabase secara berkala agar device/batch selalu segar.
+const REFRESH_MS = 5000;
 const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const route = useRoute();
 const batchPanel = ref(null);
@@ -37,6 +39,7 @@ const history = ref([]); // semua telemetry (multi-device)
 const alerts = ref([]);
 const refreshPrompt = ref("");
 const loading = ref(true);
+const lastSyncAt = ref(null); // terakhir kali auto-refresh penuh selesai
 const selectedIdx = ref(0);
 const commandFeedback = ref("");
 const commandStatusCache = new Map(); // command_id → status terakhir (dedupe)
@@ -238,20 +241,25 @@ async function loadAll() {
   // Landaskan grafik ke perangkat yang paling hidup: yang punya batch aktif,
   // atau yang telemetry-nya paling segar. Tanpa ini operator bisa mendarat di
   // unit idle (mis. index 0) dan sparkline tampak beku meski unit lain
-  // mengalir realtime.
-  const activeBatchDeviceId = batchRes.data?.[0]?.device_id;
-  const liveIdx = devices.value.findIndex((d) => d.id === activeBatchDeviceId);
-  if (liveIdx >= 0) {
-    selectedIdx.value = liveIdx;
-  } else {
-    const freshest = devices.value.reduce(
-      (best, d, i) => {
-        const t = d.last_seen_at ? new Date(d.last_seen_at).getTime() : 0;
-        return t > best.t ? { t, i } : best;
-      },
-      { t: 0, i: 0 }
+  // mengalir realtime. Hanya dilakukan saat load PERTAMA — pada auto-refresh
+  // berikutnya pilihan operator di PowerPanel tidak boleh di-reset.
+  if (loading.value) {
+    const activeBatchDeviceId = batchRes.data?.[0]?.device_id;
+    const liveIdx = devices.value.findIndex(
+      (d) => d.id === activeBatchDeviceId
     );
-    selectedIdx.value = freshest.i;
+    if (liveIdx >= 0) {
+      selectedIdx.value = liveIdx;
+    } else {
+      const freshest = devices.value.reduce(
+        (best, d, i) => {
+          const t = d.last_seen_at ? new Date(d.last_seen_at).getTime() : 0;
+          return t > best.t ? { t, i } : best;
+        },
+        { t: 0, i: 0 }
+      );
+      selectedIdx.value = freshest.i;
+    }
   }
 
   batch.value = batchRes.data?.[0] || null;
@@ -269,19 +277,15 @@ async function loadAll() {
   }
 
   // Seed penghitung tetesan: sum drip_count batch aktif dari Supabase.
-  // Menjadi nilai awal jalur DB (fallback) sekaligus seed store MQTT
-  // (seedDrips) — dipanggil sebelum connectMqtt di onMounted, jadi delta
-  // live MQTT selalu diakumulasi di atas seed ini tanpa dobel hitung.
+  // Memakai agregat DB (drip_count.sum()) — ringan untuk auto-refresh tiap
+  // 5 detik, tidak menarik semua baris sensor per batch setiap sinkronisasi.
   dripDbTotal.value = null;
   if (batch.value) {
     const { data: drips } = await supabase
       .from("sensor_logs")
-      .select("drip_count")
+      .select("drip_count.sum()")
       .eq("batch_id", batch.value.id);
-    const total = (drips || []).reduce(
-      (s, r) => s + (Number(r.drip_count) || 0),
-      0
-    );
+    const total = Number(drips?.[0]?.sum) || 0;
     dripDbTotal.value = total;
     seedDrips(batch.value.device_id, total);
   }
@@ -304,21 +308,16 @@ async function loadAll() {
   }
 }
 
-async function refreshQuiet() {
-  if (!activeDeviceId.value) return;
-  const { data } = await supabase
-    .from("sensor_logs")
-    .select("*")
-    .eq("device_id", activeDeviceId.value)
-    .order("ts", { ascending: false })
-    .limit(1);
-  if (data?.[0]) {
-    const seen = history.value.some((r) => r.id === data[0].id);
-    if (!seen) {
-      history.value.push(data[0]);
-      if (history.value.length > 240) history.value.shift();
-      checkThresholds(data[0]);
-    }
+// Auto-refresh penuh berkala (REFRESH_MS): sinkronkan ulang device, batch,
+// riwayat, dan seed tetesan dari Supabase — melengkapi jalur Realtime/MQTT
+// yang hanya meng-cover perubahan incremental (ticket auto-refresh).
+// loadAll aman dipanggil ulang: alert batch hanya di-push saat log kosong.
+async function autoRefresh() {
+  try {
+    await loadAll();
+    lastSyncAt.value = new Date().toISOString();
+  } catch (err) {
+    console.warn("[REMPAH] Auto-refresh gagal:", err);
   }
 }
 
@@ -452,7 +451,7 @@ onMounted(async () => {
     )
     .subscribe();
 
-  pollTimer = setInterval(refreshQuiet, REFRESH_MS);
+  pollTimer = setInterval(autoRefresh, REFRESH_MS);
 });
 
 onBeforeUnmount(() => {
@@ -551,6 +550,25 @@ async function refreshState() {
         >
           <span class="dot-status" :class="mqttDotClass"></span>
           {{ mqttLabel }}
+        </span>
+        <span
+          class="status-pill"
+          :title="`Sinkronisasi otomatis dari Supabase setiap ${REFRESH_MS / 1000} detik`"
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <polyline points="21 3 21 9 15 9" />
+          </svg>
+          Auto-refresh · {{ lastSyncAt ? fmtTime(lastSyncAt) : "…" }}
         </span>
       </div>
     </div>

@@ -120,9 +120,12 @@ export function setAllowedDevices(deviceIds = []) {
 // Seed penghitung tetesan dari Supabase (sum drip_count batch aktif) agar
 // nilai kumulatif bertahan melewati reload. Dipanggil dashboard saat loadAll
 // SEBELUM connectMqtt — delta live lalu diakumulasi di atas seed ini.
+// Re-seed berkala (auto-refresh) tidak boleh MENURUNKAN counter: delta MQTT
+// yang belum sempat di-persist bridge bisa membuat sum DB lebih kecil dari
+// nilai live — pakai max agar hanya menaikkan.
 export function seedDrips(deviceId, total) {
   const entry = ensureEntry(deviceId);
-  entry.total_drips = Number(total) || 0;
+  entry.total_drips = Math.max(entry.total_drips || 0, Number(total) || 0);
 }
 
 export function connectMqtt(deviceIds = []) {
