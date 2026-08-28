@@ -301,10 +301,39 @@ npm run build                  # menghasilkan dist/ statik
   `VITE_SITE_URL` (mis. `https://<domain-vercel>`); tanpa env ini fallback
   ke `window.location.origin` (berbahaya di produksi — link email bisa
   mengarah ke localhost).
+- Jalur live MQTT WebSocket (ticket 01–04): metric cards dashboard membaca
+  data LANGSUNG dari broker HiveMQ via WSS — tidak lewat bridge. Env:
+  - `VITE_MQTT_URL=wss://<cluster-url>:8884/mqtt` — port WSS (8884) & path
+    `/mqtt` adalah default HiveMQ Cloud; verifikasi di HiveMQ console bila
+    connect gagal (port bisa berbeda per cluster).
+  - `VITE_MQTT_USERNAME=<username>` / `VITE_MQTT_PASSWORD=<password>` —
+    memakai kredensial yang sama dengan device (satu credential bersama).
+    Konsekuensi: kredensial ikut terekspos di bundle browser; rotasi berarti
+    update firmware + dashboard bersamaan. Free tier HiveMQ tanpa ACL →
+    dashboard menerima semua topik; filter device milik operator dilakukan
+    client-side.
+  - Tanpa env MQTT, dashboard otomatis memakai jalur Supabase Realtime
+    (fallback) — tidak ada regresi.
 - `dist/` bisa diserve oleh Vercel/Netlify/CDN apa pun. Untuk SPA
   (history mode) di Vercel wajib ada `dashboard/vercel.json` dengan
   rewrite ke `index.html` — tanpa itu deep link seperti
   `/update-password` 404 saat dibuka langsung.
+
+### Verifikasi jalur live MQTT WebSocket (browser)
+
+Skenario manual (jalankan saat `npm run dev`):
+
+1. **Tanpa bridge**: matikan bridge, buka dashboard → metric cards & sparkline
+   tetap bergerak dari broker; pill header menampilkan "MQTT Live".
+2. **Fallback**: matikan broker/jaringan → pill berubah (reconnecting/Realtime)
+   dan data tetap tampil dari Supabase Realtime; nyalakan lagi → balik ke
+   "MQTT Live" tanpa reload.
+3. **Perintah**: mulai/mati batch tetap via `commands` → bridge; jalur MQTT
+   tidak mengubah cara perintah dikirim.
+4. **Laporan**: buka Analytics → preview/unduh PDF — data riwayat dari
+   database, tidak terpengaruh jalur live.
+5. **Delay**: bandingkan nilai dashboard dengan Serial Monitor/fake_esp32;
+   koneksi browser ↔ broker harusnya lebih cepat dari jalur bridge→Supabase.
 
 ### STOP — hentikan dashboard
 

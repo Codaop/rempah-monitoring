@@ -14,6 +14,14 @@ import PowerPanel from "../components/PowerPanel.vue";
 import BatchPanel from "../components/BatchPanel.vue";
 import NotificationLog from "../components/NotificationLog.vue";
 import { supabase } from "../lib/supabase";
+import {
+  mqttStatus,
+  mqttError,
+  liveByDevice,
+  connectMqtt,
+  disconnectMqtt,
+  setAllowedDevices,
+} from "../lib/mqtt";
 import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
 const REFRESH_MS = 30000;
@@ -42,21 +50,44 @@ const deviceHistory = computed(() =>
     ? history.value.filter((r) => r.device_id === activeDeviceId.value)
     : []
 );
-const latest = computed(
-  () => deviceHistory.value[deviceHistory.value.length - 1] || {}
-);
-// Sparkline hanya menampilkan jendela pendek (60 titik terakhir, ~2 menit @2s
-// atau ~5 menit @5s) — jendela penuh 240 titik membuat pergerakan tiap tick
-// hanya ~1px sehingga chart terlihat beku walau re-render tepat waktu.
+const latest = computed(() => {
+  if (useLive.value && liveEntry.value) {
+    const e = liveEntry.value;
+    return {
+      ...(e.telemetry || {}),
+      mode: e.mode,
+      ts: e.received_at ? new Date(e.received_at).toISOString() : null,
+    };
+  }
+  return deviceHistory.value[deviceHistory.value.length - 1] || {};
+});
+// Sparkline hanya menampilkan jendela pendek (60 titik terakhir) — jendela
+// penuh 240 titik membuat pergerakan tiap tick hanya ~1px sehingga chart
+// terlihat beku walau re-render tepat waktu.
 const SPARK_POINTS = 60;
+// Jalur live MQTT (ticket 01–03): saat browser terhubung langsung ke broker,
+// nilai & sparkline diambil dari store live; fallback ke riwayat Supabase.
+const liveEntry = computed(() =>
+  activeDeviceId.value ? liveByDevice[activeDeviceId.value] : null
+);
+const liveFresh = computed(() => {
+  const e = liveEntry.value;
+  return !!(e && e.received_at && Date.now() - e.received_at < OFFLINE_MS);
+});
+const useLive = computed(
+  () => mqttStatus.value === "connected" && liveFresh.value
+);
+function pickSpark(deviceId, key) {
+  const s = useLive.value ? liveByDevice[deviceId]?.sparks?.[key] : null;
+  if (s && s.length) return s;
+  return deviceHistory.value.slice(-SPARK_POINTS).map((r) => r[key]);
+}
 const sparkTemp = computed(() =>
-  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.boiler_temp_c)
+  pickSpark(activeDeviceId.value, "boiler_temp_c")
 );
-const sparkGas = computed(() =>
-  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.gas_mass_kg)
-);
+const sparkGas = computed(() => pickSpark(activeDeviceId.value, "gas_mass_kg"));
 const sparkCooling = computed(() =>
-  deviceHistory.value.slice(-SPARK_POINTS).map((r) => r.cooling_temp_c)
+  pickSpark(activeDeviceId.value, "cooling_temp_c")
 );
 
 const greeting = computed(() => {
@@ -82,6 +113,21 @@ const dataFlowing = computed(() => {
   if (!ts) return false;
   const age = Date.now() - new Date(ts).getTime();
   return age >= 0 && age < OFFLINE_MS;
+});
+
+// Indikator jalur data live di header (ticket 01).
+const mqttLabel = computed(() => {
+  if (mqttStatus.value === "connected")
+    return useLive.value ? "MQTT Live" : "MQTT Terhubung";
+  if (mqttStatus.value === "connecting") return "MQTT Menghubungkan…";
+  if (mqttStatus.value === "reconnecting") return "MQTT Menghubung ulang…";
+  return "Realtime";
+});
+const mqttDotClass = computed(() => {
+  if (mqttStatus.value === "connected") return "dot-ok";
+  if (mqttStatus.value === "connecting" || mqttStatus.value === "reconnecting")
+    return "dot-warn";
+  return "dot-off";
 });
 
 const statusSubtitle = computed(() => {
@@ -236,6 +282,9 @@ let pollTimer = null;
 onMounted(async () => {
   await loadAll();
 
+  // Jalur live: browser terhubung langsung ke broker MQTT (ticket 01).
+  connectMqtt(devices.value.map((d) => d.id));
+
   realtime = supabase
     .channel("dashboard-live")
     .on(
@@ -357,12 +406,23 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(pollTimer);
   realtime && supabase.removeChannel(realtime);
+  disconnectMqtt();
 });
 
-// Jaga selectedIdx tetap valid saat daftar device berubah (ticket 37).
+// Jaga selectedIdx tetap valid & sinkronkan daftar device ke live store MQTT
+// (ticket 37, 01) — device baru ikut difilter/subscribe tanpa reload.
 watch(devices, (list) => {
   if (selectedIdx.value >= list.length)
     selectedIdx.value = Math.max(0, list.length - 1);
+  setAllowedDevices(list.map((d) => d.id));
+});
+
+// Mode device ikut ter-update dari pesan state MQTT yang retained (ticket 02).
+watch(liveByDevice, (store) => {
+  for (const dev of devices.value) {
+    const e = store[dev.id];
+    if (e && e.mode && dev.mode !== e.mode) dev.mode = e.mode;
+  }
 });
 
 function onCommand({ device, action, mismatch }) {
@@ -430,6 +490,15 @@ async function refreshState() {
             <line x1="12" y1="20" x2="12.01" y2="20" />
           </svg>
           {{ dataFlowing ? "Terhubung" : "Menunggu Data" }}
+        </span>
+        <span
+          class="status-pill"
+          :title="
+            mqttError || 'Jalur data live: MQTT WebSocket ↔ Supabase Realtime'
+          "
+        >
+          <span class="dot-status" :class="mqttDotClass"></span>
+          {{ mqttLabel }}
         </span>
       </div>
     </div>
@@ -607,6 +676,9 @@ async function refreshState() {
 }
 .dot-off {
   background: var(--muted);
+}
+.dot-warn {
+  background: #d69e2e;
 }
 
 .idle-live-hint {
