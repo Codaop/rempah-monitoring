@@ -25,5 +25,8 @@ venv/
 supabase/.env
 
 # Non-related file
+# Firmware Arduino (.ino) tidak di-version-control di repo ini — dipakai
+# lokal untuk flash alat. Jika pernah ter-commit, jalankan:
+#   git rm --cached <file>.ino
 *.ino
 nul
