@@ -26,6 +26,10 @@ const loadError = ref("");
 const newName = ref("");
 const regBusy = ref(false);
 const regError = ref("");
+const deleteBusy = ref(false);
+const deleteError = ref("");
+const deleteConfirm = ref(null); // 'delete-device' | 'confirm-delete' | null
+const selectedDeleteId = ref(null); // id device yang sedang dipilih untuk dihapus
 const flash = ref(null); // device baru → kartu flash provisioning
 
 // ── Kartu flash yang dibuka ulang (ticket 38) ───────────────────────────────
@@ -100,7 +104,49 @@ async function registerDevice() {
   try {
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData.user?.id;
-    if (!userId) throw new Error("sesi pengguna tidak ditemukan.");
+    if (!userId) throw new Error("sesi pengguna tidak ditemukan."
+
+  // ── Fungsi hapus device (tiket 63) ────────────────────────────────────
+async function deleteDeviceConfirm() {
+  deleteBusy.value = true;
+  deleteError.value = "";
+  try {
+    const { data, error } = await supabase.rpc('delete_device', { p_device_id: selectedDeleteId.value });
+    if (error) throw error;
+    if (data?.success) {
+      await loadDevices();
+      deleteConfirm.value = null;
+      selectedDeleteId.value = null;
+      flash.value = { type: 'success', message: 'Perangkat berhasil dihapus.' };
+    } else {
+      deleteError.value = data?.error || 'Gagal menghapus perangkat.';
+    }
+  } catch (e) {
+    deleteError.value = `Error: ${e.message || String(e)}`;
+  } finally {
+    deleteBusy.value = false;
+  }
+}
+
+function cancelDeleteDevice() {
+  deleteConfirm.value = null;
+  selectedDeleteId.value = null;
+}
+
+function selectDevice(idx) {
+  selectedIdx.value = idx;
+  showPicker.value = false;
+}
+
+// Render hint batch aktif di dalam modal konfirmasi hapus
+function getDeleteHint(deviceId) {
+  const d = devices.value.find((x) => x.id === deviceId);
+  if (!d) return '';
+  if (d.mode && d.mode !== 'IDLE' && d.mode !== 'ESTOP') {
+    return ` (Batch sedang berjalan, mode: ${d.mode})`;
+  }
+  return '';
+}
 
     const { data: op } = await supabase
       .from("operators")
@@ -283,8 +329,7 @@ onBeforeUnmount(() => {
                     d.last_seen_at
                       ? 'Terakhir terlihat ' + fmtDateTime(d.last_seen_at)
                       : ''
-                  "
-                >
+                  ">
                   <span class="chip-dot"></span>
                   {{ deviceStatus(d).label }}
                 </span>
@@ -295,6 +340,13 @@ onBeforeUnmount(() => {
                   @click="reflash = d"
                 >
                   Kartu Flash
+                </button>
+                <button
+                  class="btn btn-danger btn-sm delete-btn"
+                  @click="confirmDeleteDevice(d.id)"
+                  :disabled="deleteBusy || d.mode && d.mode !== 'IDLE' && d.mode !== 'ESTOP'"
+                >
+                  Hapus
                 </button>
               </td>
             </tr>
@@ -395,13 +447,39 @@ onBeforeUnmount(() => {
 
         <p class="muted flash-foot">
           Root topic: <code>rempah/</code>. Gunakan client_id unik per perangkat
-          di firmware (mis. <code>client-&lt;device_id&gt;</code>) — bukan di
+          di firmware (mis. <code>client-<device_id></code>) — bukan di
           web HiveMQ.
         </p>
       </template>
 
       <template #actions>
-        <button class="btn btn-ghost" @click="flash = null">Tutup</button>
+        <button class="btn btn-ghost" @click="reflash = null">Tutup</button>
+      </template>
+    </AppModal>
+
+    <!-- Modal konfirmasi hapus device (tiket 63) -->
+    <AppModal
+      :open="deleteConfirm !== null"
+      title="Hapus Perangkat"
+      max-width="460px"
+      @close="cancelDeleteDevice"
+    >
+      <p class="confirm-text">
+        Apakah Anda yakin ingin menghapus perangkat <strong>{{ selectedDeleteId ? devices.value.find(d => d.id === selectedDeleteId)?.name : 'device ini' }}</strong>?
+      </p>
+      <p v-if="deleteConfirm === 'confirm-delete'" class="note note-err">
+        Device ini masih memiliki batch aktif — batch harus selesai atau dihentikan terlebih dahulu sebelum perangkat dapat dihapus.
+      </p>
+      <p v-else class="note"></p>
+      <template #actions>
+        <button class="btn btn-ghost" @click="cancelDeleteDevice">Batal</button>
+        <button
+          class="btn btn-danger"
+          :disabled="deleteBusy"
+          @click="deleteDeviceConfirm"
+        >
+          {{ deleteBusy ? "Mengirim…" : "Hapus" }}
+        </button>
       </template>
     </AppModal>
 

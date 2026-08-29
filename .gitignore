@@ -30,3 +30,5 @@ supabase/.env
 #   git rm --cached <file>.ino
 *.ino
 nul
+.vercel
+.env*
