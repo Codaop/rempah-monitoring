@@ -468,7 +468,7 @@ onBeforeUnmount(() => {
         Apakah Anda yakin ingin menghapus perangkat
         <strong>{{
           selectedDeleteId
-            ? devices.value.find((d) => d.id === selectedDeleteId)?.name
+            ? devices.find((d) => d.id === selectedDeleteId)?.name
             : "device ini"
         }}</strong
         >?
