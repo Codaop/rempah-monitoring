@@ -13,6 +13,7 @@ import MetricCard from "../components/MetricCard.vue";
 import PowerPanel from "../components/PowerPanel.vue";
 import BatchPanel from "../components/BatchPanel.vue";
 import NotificationLog from "../components/NotificationLog.vue";
+import AppModal from "../components/AppModal.vue";
 import { supabase } from "../lib/supabase";
 import {
   mqttStatus,
@@ -22,11 +23,13 @@ import {
   disconnectMqtt,
   setAllowedDevices,
   seedDrips,
+  publishCommand,
 } from "../lib/mqtt";
 import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
 
-// Auto-refresh penuh tiap 10 detik — data realtime (MQTT/Realtime) digabung
-// sinkronisasi state Supabase secara berkala agar device/batch selalu segar.
+// Auto-refresh ringan tiap 10 detik — HANYA menyegarkan data metric cards
+// (riwayat telemetry + seed tetesan). Perubahan device/batch dilayani
+// subscription Realtime; reload penuh hanya saat mount/refresh manual.
 const REFRESH_MS = 10000;
 const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const route = useRoute();
@@ -38,6 +41,14 @@ const batchLog = ref(null);
 const history = ref([]); // semua telemetry (multi-device)
 const alerts = ref([]);
 const refreshPrompt = ref("");
+
+// ── Resume batch terputus (ticket 60) ───────────────────────────────────────
+// Saat device kembali online & ada batch interrupted, modal konfirmasi muncul:
+// lanjutkan batch yang sama (RESUME_BATCH + POWER_ON) atau mulai batch baru.
+const interruptedBatch = ref(null); // batch interrupted terbaru
+const handledInterruptIds = ref(new Set()); // nasib sudah diputuskan (dismiss/resume/baru)
+const resumeBusy = ref(false);
+const resumeError = ref("");
 const loading = ref(true);
 const lastSyncAt = ref(null); // terakhir kali auto-refresh penuh selesai
 const selectedIdx = ref(0);
@@ -48,25 +59,28 @@ const selectedDevice = computed(() => devices.value[selectedIdx.value] || null);
 const activeDeviceId = computed(() => selectedDevice.value?.id || null);
 
 // ── Penghitung tetesan (card TOTAL TETESAN) ────────────────────────────────
-// Nilai kumulatif batch aktif: di-seed dari Supabase (sum drip_count batch),
-// lalu di-inkremen live — dari pesan MQTT saat terhubung, atau dari Realtime
-// INSERT saat MQTT mati (jangan dua-duanya agar tidak dobel hitung).
-const dripDbTotal = ref(null); // jalur DB (fallback / seed)
+// drip_count dari broker/DB sudah merupakan jumlah total tetesan yang
+// dideteksi hardware — ditampilkan apa adanya (tidak diakumulasi).
+const dripDbTotal = ref(null); // jalur DB (fallback): nilai drip_count terakhir
 const batchDeviceId = computed(() => batch.value?.device_id || null);
 const batchLiveEntry = computed(() =>
   batchDeviceId.value ? liveByDevice[batchDeviceId.value] : null
 );
 const dripValue = computed(() => {
-  if (!batch.value) return "—";
+  // Prioritas 1: jalur live MQTT — total tetesan perangkat (kumulatif). Tidak
+  // wajib ada batch aktif: kalau broker mengirim data drip, card menampilkan.
   if (mqttStatus.value === "connected") {
-    const e = batchLiveEntry.value;
+    const devId = batchDeviceId.value || activeDeviceId.value;
+    const e = devId ? liveByDevice[devId] : null;
     if (e && e.total_drips != null) return fmtNum(e.total_drips, 0);
   }
+  // Prioritas 2: fallback DB (nilai drip_count terakhir) saat MQTT mati.
   return dripDbTotal.value != null ? fmtNum(dripDbTotal.value, 0) : "—";
 });
 const sparkDrips = computed(() => {
   if (mqttStatus.value === "connected") {
-    const s = batchLiveEntry.value?.sparks?.drip_count;
+    const devId = batchDeviceId.value || activeDeviceId.value;
+    const s = devId ? liveByDevice[devId]?.sparks?.drip_count : null;
     if (s && s.length) return s;
   }
   return deviceHistory.value
@@ -205,32 +219,41 @@ function commandStatusLabel(status) {
 }
 
 async function loadAll() {
-  const [devRes, stateRes, batchRes, logRes, histRes] = await Promise.all([
-    supabase
-      .from("devices")
-      .select(
-        "id, producer_id, name, mqtt_username, last_seen_at, first_seen_at"
-      ),
-    supabase
-      .from("device_state")
-      .select("device_id, producer_id, mode, updated_at"),
-    supabase
-      .from("batches")
-      .select("*")
-      .eq("status", "active")
-      .order("started_at", { ascending: false })
-      .limit(1),
-    supabase
-      .from("batch_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1),
-    supabase
-      .from("sensor_logs")
-      .select("*")
-      .order("ts", { ascending: false })
-      .limit(240),
-  ]);
+  const [devRes, stateRes, batchRes, logRes, histRes, interruptedRes] =
+    await Promise.all([
+      supabase
+        .from("devices")
+        .select(
+          "id, producer_id, name, mqtt_username, last_seen_at, first_seen_at"
+        ),
+      supabase
+        .from("device_state")
+        .select("device_id, producer_id, mode, updated_at"),
+      supabase
+        .from("batches")
+        .select("*")
+        .eq("status", "active")
+        .order("started_at", { ascending: false })
+        .limit(1),
+      supabase
+        .from("batch_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1),
+      supabase
+        .from("sensor_logs")
+        .select("*")
+        .order("ts", { ascending: false })
+        .limit(240),
+      // Batch terputus terbaru (ticket 58): device mati mendadak → status
+      // interrupted. Dipakai modal konfirmasi resume (ticket 60).
+      supabase
+        .from("batches")
+        .select("*")
+        .eq("status", "interrupted")
+        .order("interrupted_at", { ascending: false })
+        .limit(1),
+    ]);
 
   const states = stateRes.data || [];
   devices.value = (devRes.data || []).map((d) => ({
@@ -263,6 +286,7 @@ async function loadAll() {
   }
 
   batch.value = batchRes.data?.[0] || null;
+  interruptedBatch.value = interruptedRes.data?.[0] || null;
   // batch_logs hanya relevan saat batch aktif (ticket 35: metrik idle datang
   // langsung dari telemetry, bukan dari batch).
   if (batch.value) {
@@ -276,18 +300,19 @@ async function loadAll() {
     batchLog.value = null;
   }
 
-  // Seed penghitung tetesan: sum drip_count batch aktif dari Supabase.
-  // Memakai agregat DB (drip_count.sum()) — ringan untuk auto-refresh tiap
-  // 5 detik, tidak menarik semua baris sensor per batch setiap sinkronisasi.
+  // Seed penghitung tetesan: nilai drip_count TERAKHIR batch aktif dari
+  // Supabase — bukan SUM, karena tiap baris sudah bernilai kumulatif.
   dripDbTotal.value = null;
   if (batch.value) {
     const { data: drips } = await supabase
       .from("sensor_logs")
-      .select("drip_count.sum()")
-      .eq("batch_id", batch.value.id);
-    const total = Number(drips?.[0]?.sum) || 0;
-    dripDbTotal.value = total;
-    seedDrips(batch.value.device_id, total);
+      .select("drip_count")
+      .eq("batch_id", batch.value.id)
+      .order("ts", { ascending: false })
+      .limit(1);
+    const latest = Number(drips?.[0]?.drip_count) || 0;
+    dripDbTotal.value = latest;
+    seedDrips(batch.value.device_id, latest);
   }
   history.value = (histRes.data || []).reverse();
   loading.value = false;
@@ -308,16 +333,38 @@ async function loadAll() {
   }
 }
 
-// Auto-refresh penuh berkala (REFRESH_MS): sinkronkan ulang device, batch,
-// riwayat, dan seed tetesan dari Supabase — melengkapi jalur Realtime/MQTT
-// yang hanya meng-cover perubahan incremental (ticket auto-refresh).
-// loadAll aman dipanggil ulang: alert batch hanya di-push saat log kosong.
-async function autoRefresh() {
+// Auto-refresh ringan (REFRESH_MS): HANYA menyegarkan data yang dipakai
+// metric cards — riwayat telemetry (sparkline) & nilai tetesan batch aktif.
+// Tidak me-reset devices/batch/state sehingga pilihan operator di panel
+// tidak terganggu; transisi batch/device dilayani subscription Realtime.
+async function refreshCards() {
   try {
-    await loadAll();
+    const batchId = batch.value?.id || null;
+    const [histRes, seedRes] = await Promise.all([
+      supabase
+        .from("sensor_logs")
+        .select("*")
+        .order("ts", { ascending: false })
+        .limit(240),
+      batchId
+        ? supabase
+            .from("sensor_logs")
+            .select("drip_count")
+            .eq("batch_id", batchId)
+            .order("ts", { ascending: false })
+            .limit(1)
+        : Promise.resolve({ data: null }),
+    ]);
+    if (histRes.data) history.value = histRes.data.reverse();
+    if (seedRes.data && batchId) {
+      // Nilai terakhir sudah kumulatif — ganti, bukan tambah.
+      const latest = Number(seedRes.data?.[0]?.drip_count) || 0;
+      dripDbTotal.value = latest;
+      seedDrips(batch.value.device_id, latest);
+    }
     lastSyncAt.value = new Date().toISOString();
   } catch (err) {
-    console.warn("[REMPAH] Auto-refresh gagal:", err);
+    console.warn("[REMPAH] Refresh card gagal:", err);
   }
 }
 
@@ -337,11 +384,12 @@ onMounted(async () => {
       { event: "INSERT", schema: "public", table: "sensor_logs" },
       (payload) => {
         const row = payload.new;
-        // Akumulasi tetesan via Realtime HANYA saat MQTT mati — saat MQTT
-        // terhubung delta sudah dihitung dari pesan langsung (hindari dobel).
+        // Nilai drip_count sudah kumulatif — tampilkan nilai terbaru saja,
+        // jangan diakumulasi (revisi logika card tetesan).
         if (mqttStatus.value !== "connected") {
-          dripDbTotal.value =
-            (dripDbTotal.value || 0) + (Number(row.drip_count) || 0);
+          if (row.drip_count !== undefined && row.drip_count !== null) {
+            dripDbTotal.value = Number(row.drip_count);
+          }
         }
         if (activeDeviceId.value && row.device_id === activeDeviceId.value) {
           const seen = history.value.some((r) => r.id === row.id);
@@ -373,7 +421,10 @@ onMounted(async () => {
       { event: "UPDATE", schema: "public", table: "devices" },
       (payload) => {
         const d = devices.value.find((x) => x.id === payload.new.id);
-        if (d) d.first_seen_at = payload.new.first_seen_at || d.first_seen_at;
+        if (d) {
+          d.first_seen_at = payload.new.first_seen_at || d.first_seen_at;
+          d.last_seen_at = payload.new.last_seen_at || d.last_seen_at;
+        }
         if (payload.new.first_seen_at && !payload.old?.first_seen_at) {
           const name = d ? d.name : payload.new.id.slice(0, 8);
           pushAlert(
@@ -449,9 +500,43 @@ onMounted(async () => {
         );
       }
     )
+    // Transisi batch (aktif → terputus/selesai/batal) dilayani Realtime —
+    // status panel & modal resume tetap segar tanpa reload penuh.
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "batches" },
+      (payload) => {
+        const nb = payload.new;
+        if (nb.status === "active") {
+          const isSame = batch.value?.id === nb.id;
+          batch.value = nb;
+          if (interruptedBatch.value?.id === nb.id) {
+            interruptedBatch.value = null;
+          }
+          if (!isSame) batchLog.value = null;
+        } else if (nb.status === "interrupted") {
+          if (batch.value?.id === nb.id) {
+            batch.value = null;
+            batchLog.value = null;
+            dripDbTotal.value = null;
+          }
+          interruptedBatch.value = nb;
+        } else {
+          // completed / cancelled — batch aktif berakhir
+          if (batch.value?.id === nb.id) {
+            batch.value = null;
+            batchLog.value = null;
+            dripDbTotal.value = null;
+          }
+          if (interruptedBatch.value?.id === nb.id) {
+            interruptedBatch.value = null;
+          }
+        }
+      }
+    )
     .subscribe();
 
-  pollTimer = setInterval(autoRefresh, REFRESH_MS);
+  pollTimer = setInterval(refreshCards, REFRESH_MS);
 });
 
 onBeforeUnmount(() => {
@@ -487,6 +572,11 @@ function onBatchLog({ level, tag, message }) {
   pushAlert(level || "info", tag || "BATCH", message);
 }
 
+function deviceName(id) {
+  const d = devices.value.find((x) => x.id === id);
+  return d ? d.name : id ? `Perangkat ${id.slice(0, 8)}` : "—";
+}
+
 async function onBatchCreated() {
   await loadAll();
 }
@@ -505,6 +595,86 @@ async function refreshState() {
   refreshPrompt.value = "";
   await loadAll();
   pushAlert("info", "SISTEM", "Status perangkat disinkronkan.");
+}
+
+// ── Resume batch terputus (ticket 60) ───────────────────────────────────────
+// Modal muncul saat device pemilik batch interrupted kembali online dan nasib
+// batch itu belum diputuskan di sesi ini (dismiss/resume/batch baru).
+const resumeDeviceOnline = computed(() => {
+  const b = interruptedBatch.value;
+  if (!b) return false;
+  const d = devices.value.find((x) => x.id === b.device_id);
+  if (!d) return false;
+  const ms = offlineSince(d.last_seen_at);
+  return ms >= 0 && ms < OFFLINE_MS;
+});
+
+const showResumeModal = computed(() => {
+  const b = interruptedBatch.value;
+  if (!b) return false;
+  if (handledInterruptIds.value.has(b.id)) return false;
+  return resumeDeviceOnline.value;
+});
+
+function dismissResumeModal() {
+  // Operator menunda keputusan → jangan muncul lagi tiap auto-refresh.
+  if (interruptedBatch.value)
+    handledInterruptIds.value.add(interruptedBatch.value.id);
+}
+
+async function resumeInterruptedBatch() {
+  const b = interruptedBatch.value;
+  if (!b || resumeBusy.value) return;
+  const d = devices.value.find((x) => x.id === b.device_id);
+  if (!d) return;
+  resumeBusy.value = true;
+  resumeError.value = "";
+  try {
+    // RESUME_BATCH: bridge mengembalikan batch interrupted → active (ticket 59).
+    const { error: rErr } = await supabase.from("commands").insert({
+      producer_id: d.producer_id,
+      device_id: d.id,
+      action: "RESUME_BATCH",
+      expected_state: null,
+    });
+    if (rErr) throw rErr;
+    // Nyalakan perangkat seketika via broker MQTT — tanpa menunggu poll bridge
+    // (2s). Firmware idempoten terhadap "mulai" ganda; bridge tetap meneruskan
+    // POWER_ON di bawah sebagai jalur cadangan + lifecycle command.
+    publishCommand(d.id, "mulai");
+    // POWER_ON: nyalakan ulang pemanasan; telemetry lanjut ke batch yang sama.
+    const { error: pErr } = await supabase.from("commands").insert({
+      producer_id: d.producer_id,
+      device_id: d.id,
+      action: "POWER_ON",
+      expected_state: "IDLE",
+    });
+    if (pErr) throw pErr;
+    handledInterruptIds.value.add(b.id);
+    await loadAll();
+    pushAlert(
+      "info",
+      "BATCH",
+      `Batch #${b.id.slice(0, 4).toUpperCase()} dilanjutkan — menunggu perangkat menyala.`
+    );
+  } catch (e) {
+    resumeError.value = `Gagal: ${e.message}`;
+  } finally {
+    resumeBusy.value = false;
+  }
+}
+
+function startNewBatchInstead() {
+  const b = interruptedBatch.value;
+  if (!b) return;
+  // Batch lama tetap interrupted (masuk riwayat), form batch baru dibuka.
+  handledInterruptIds.value.add(b.id);
+  pushAlert(
+    "info",
+    "BATCH",
+    `Batch #${b.id.slice(0, 4).toUpperCase()} dibiarkan terputus — membuat batch baru.`
+  );
+  batchPanel.value?.openModal();
 }
 </script>
 
@@ -672,7 +842,13 @@ async function refreshState() {
           unit="tetes"
           :data="sparkDrips"
           color="#3a7ca5"
-          :hint="batch ? 'Kumulatif batch aktif' : 'Menunggu batch aktif'"
+          :hint="
+            mqttStatus === 'connected'
+              ? 'Total tetesan perangkat (live)'
+              : dripDbTotal != null
+                ? 'Total tetesan (riwayat terakhir)'
+                : 'Menunggu data perangkat'
+          "
         >
           <template #icon>
             <svg
@@ -715,6 +891,76 @@ async function refreshState() {
       <!-- Notification log -->
       <NotificationLog :alerts="alerts" />
     </template>
+
+    <!-- Modal resume batch terputus (ticket 60) -->
+    <AppModal
+      :open="showResumeModal"
+      title="Batch Terputus Ditemukan"
+      @close="dismissResumeModal"
+    >
+      <p class="muted modal-sub">
+        Batch
+        {{
+          interruptedBatch
+            ? "#" + interruptedBatch.id.slice(0, 8).toUpperCase()
+            : ""
+        }}
+        (
+        {{ interruptedBatch ? deviceName(interruptedBatch.device_id) : "—" }}
+        ) terputus saat mesin mati mendadak. Perangkat sudah kembali online.
+        Lanjutkan batch yang sama atau mulai batch baru?
+      </p>
+      <div class="resume-info" v-if="interruptedBatch">
+        <div class="info-row">
+          <span>Mulai</span
+          ><b>{{
+            interruptedBatch.started_at
+              ? fmtDateTime(interruptedBatch.started_at).slice(0, 16)
+              : "—"
+          }}</b>
+        </div>
+        <div class="info-row">
+          <span>Terputus</span
+          ><b>{{
+            interruptedBatch.interrupted_at
+              ? fmtDateTime(interruptedBatch.interrupted_at).slice(0, 16)
+              : "—"
+          }}</b>
+        </div>
+        <div class="info-row">
+          <span>Massa Muatan</span
+          ><b>{{
+            interruptedBatch.charge_mass_kg
+              ? fmtNum(interruptedBatch.charge_mass_kg) + " kg"
+              : "—"
+          }}</b>
+        </div>
+      </div>
+      <p v-if="resumeError" class="note note-err">{{ resumeError }}</p>
+      <template #actions>
+        <button
+          class="btn btn-ghost"
+          :disabled="resumeBusy"
+          @click="dismissResumeModal"
+        >
+          Nanti
+        </button>
+        <button
+          class="btn btn-ghost"
+          :disabled="resumeBusy"
+          @click="startNewBatchInstead"
+        >
+          Mulai Batch Baru
+        </button>
+        <button
+          class="btn btn-primary"
+          :disabled="resumeBusy"
+          @click="resumeInterruptedBatch"
+        >
+          {{ resumeBusy ? "Mengirim…" : "Lanjutkan Batch" }}
+        </button>
+      </template>
+    </AppModal>
   </AppShell>
 </template>
 
@@ -835,5 +1081,42 @@ async function refreshState() {
   .grid-mid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Modal resume batch (ticket 60) */
+.modal-sub {
+  margin: 0 0 14px;
+}
+
+.resume-info {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.info-row:last-child {
+  border-bottom: none;
+}
+.info-row span {
+  color: var(--muted);
+}
+.info-row b {
+  color: var(--navy);
+  font-weight: 600;
+  text-align: right;
+}
+
+.note-err {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 </style>

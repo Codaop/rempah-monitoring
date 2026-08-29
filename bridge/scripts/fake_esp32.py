@@ -36,12 +36,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 MQTT_BROKER      = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
-TOPIC_ROOT       = os.environ.get("MQTT_TOPIC_ROOT", "rempah")
+TOPIC_ROOT       = os.environ.get("MQTT_TOPIC_ROOT", "command")
 # Kredensial device: prioritas FAKE_DEVICE_*, fallback ke kredensial bridge
 # (MQTT_USERNAME/PASSWORD) supaya demo jalan langsung dengan bridge/.env.
-DEVICE_USERNAME  = os.environ.get("FAKE_DEVICE_USERNAME") or os.environ.get("MQTT_USERNAME", "")
-DEVICE_PASSWORD  = os.environ.get("FAKE_DEVICE_PASSWORD") or os.environ.get("MQTT_PASSWORD", "")
-DEVICE_ID        = os.environ.get("FAKE_DEVICE_ID", "1a1a0000-0000-4000-8000-000000000001")
+DEVICE_USERNAME  = os.environ.get("FAKE_DEVICE_USERNAME") or os.environ.get("MQTT_USERNAME", "rempah")
+DEVICE_PASSWORD  = os.environ.get("FAKE_DEVICE_PASSWORD") or os.environ.get("MQTT_PASSWORD", "rempah123")
+DEVICE_ID        = os.environ.get("FAKE_DEVICE_ID", "83271141-f523-4001-9d13-36506b848f8c")
 INITIAL_MODE     = os.environ.get("FAKE_DEVICE_MODE", "DISTILLING")
 INTERVAL         = float(os.environ.get("FEED_INTERVAL", "2"))
 

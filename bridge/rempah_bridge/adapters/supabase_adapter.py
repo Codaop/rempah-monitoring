@@ -304,6 +304,67 @@ class SupabaseDbAdapter:
             batch_id[:8], peak_temp, duration_s, yield_l, gas_used_kg,
         )
 
+    def interrupt_active_batch(self, device_id: str, ts: str) -> None:
+        """Mark the device's active batch as interrupted (sudden disconnect).
+
+        Idempotent: nothing happens when there is no active batch. The batch is
+        NOT finalized — no batch_logs aggregate is written, so a later resume
+        (ticket 59) keeps the same batch identity and sensor history.
+        """
+        resp = (
+            self._client.table("batches")
+            .select("id")
+            .eq("device_id", device_id)
+            .eq("status", "active")
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if not resp or not resp.data:
+            logger.debug(
+                "No active batch for device %s; nothing to interrupt", device_id
+            )
+            return
+        batch_id = resp.data["id"]
+        self._client.table("batches").update(
+            {"status": "interrupted", "interrupted_at": ts}
+        ).eq("id", batch_id).execute()
+        logger.info(
+            "batch %s interrupted at %s (device %s went silent)",
+            batch_id[:8], ts, device_id,
+        )
+
+    def resume_interrupted_batch(self, device_id: str) -> bool:
+        """Flip the device's interrupted batch back to active (ticket 59).
+
+        Keeps `started_at` so total duration stays honest from the original
+        start; clears `interrupted_at`. Returns False (and touches nothing)
+        when there is no interrupted batch for the device.
+        """
+        resp = (
+            self._client.table("batches")
+            .select("id")
+            .eq("device_id", device_id)
+            .eq("status", "interrupted")
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if not resp or not resp.data:
+            logger.debug(
+                "No interrupted batch for device %s; nothing to resume", device_id
+            )
+            return False
+        batch_id = resp.data["id"]
+        self._client.table("batches").update(
+            {"status": "active", "interrupted_at": None}
+        ).eq("id", batch_id).execute()
+        logger.info(
+            "batch %s resumed to active (device %s reconnected)",
+            batch_id[:8], device_id,
+        )
+        return True
+
     # ── Retention ────────────────────────────────────────────────────────────
 
     def purge_old_sensor_logs(self) -> None:

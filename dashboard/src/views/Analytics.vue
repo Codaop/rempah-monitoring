@@ -190,6 +190,22 @@ const selectedBatch = computed(
   () => batchOptions.value.find((b) => b.id === selectedBatchId.value) || null
 );
 
+// Label akhir batch untuk preview laporan — interrupted memakai interrupted_at
+// dengan penanda "(terputus)" agar tidak terlihat selesai normal (ticket 61).
+function previewEndLabel(b) {
+  if (!b) return "";
+  if (b.status === "interrupted") {
+    return b.interrupted_at
+      ? ` → ${fmtDateTime(b.interrupted_at).slice(0, 16)} (terputus)`
+      : " (terputus)";
+  }
+  return b.ended_at
+    ? ` → ${fmtDateTime(b.ended_at).slice(0, 16)}`
+    : b.status === "active"
+      ? " → Masih berjalan"
+      : "";
+}
+
 function deviceNameOf(id) {
   const d = snapshot.value?.devices.find((x) => x.id === id);
   return d ? d.name : id ? `Perangkat ${id.slice(0, 8)}` : "—";
@@ -206,7 +222,7 @@ async function loadBatches() {
   const { data } = await supabase
     .from("batches")
     .select(
-      "id, producer_id, device_id, charge_mass_kg, target_yield_l, estimated_finish_at, started_at, ended_at, status"
+      "id, producer_id, device_id, charge_mass_kg, target_yield_l, estimated_finish_at, started_at, ended_at, interrupted_at, status"
     )
     .order("started_at", { ascending: false })
     .limit(20);
@@ -313,6 +329,14 @@ async function submitYield() {
 
 watch(selectedBatchId, loadBatchReport);
 
+function batchStatusLabel(status) {
+  if (status === "completed") return "Selesai";
+  if (status === "active") return "Aktif";
+  if (status === "pending") return "Menunggu";
+  if (status === "interrupted") return "Terputus";
+  return status ? status.toUpperCase() : "—";
+}
+
 function fmtDuration(sec) {
   const s = Math.max(1, Math.round(Number(sec)));
   const mins = Math.round(s / 60);
@@ -323,10 +347,12 @@ function fmtDuration(sec) {
 
 // Durasi batch dalam detik, dihitung langsung dari selesai − mulai.
 // Fallback ke interval ISO ("PT{n}S") dari batch_logs bila timestamp tidak lengkap.
+// Batch interrupted: durasi jujur dari started_at sampai interrupted_at — bukan
+// seolah selesai normal (ticket 61).
 function batchDurationSec(b, log) {
-  if (b.started_at && b.ended_at) {
-    const ms =
-      new Date(b.ended_at).getTime() - new Date(b.started_at).getTime();
+  const endIso = b.status === "interrupted" ? b.interrupted_at : b.ended_at;
+  if (b.started_at && endIso) {
+    const ms = new Date(endIso).getTime() - new Date(b.started_at).getTime();
     if (Number.isFinite(ms) && ms > 0) return ms / 1000;
   }
   const iso = log?.duration;
@@ -380,20 +406,34 @@ function buildReportHtml(r, print) {
     log.gas_start_kg != null && log.gas_end_kg != null
       ? `(awal ${fmtNum(log.gas_start_kg)} kg → akhir ${fmtNum(log.gas_end_kg)} kg)`
       : "";
-  // Tanggal "Dibuat" = waktu batch selesai (laporan akhir tercatat), bukan
+  // Tanggal "Dibuat" = waktu batch berakhir tercatat (laporan akhir), bukan
   // waktu preview/download. batch_logs.created_at tidak dipakai karena bisa
   // terbentuk sejak batch dibuka (upsert awal saat batch berjalan).
+  // Batch interrupted: gunakan interrupted_at — waktu batch benar-benar berhenti.
   const createdLabel = b.ended_at
     ? fmtDateTime(b.ended_at)
-    : log.created_at
-      ? fmtDateTime(log.created_at)
-      : fmtDateTime(new Date());
+    : b.status === "interrupted" && b.interrupted_at
+      ? fmtDateTime(b.interrupted_at)
+      : log.created_at
+        ? fmtDateTime(log.created_at)
+        : fmtDateTime(new Date());
   const oilVolume =
     log.oil_volume_ml != null ? fmtNum(log.oil_volume_ml) + " ml" : "—";
   const rendemen =
     log.yield_rendemen_ml_per_kg != null
       ? fmtNum(log.yield_rendemen_ml_per_kg) + " ml/kg"
       : "—";
+  // Batch terputus: baris "Selesai" jujur — pakai interrupted_at + label.
+  const endLabel =
+    b.status === "interrupted"
+      ? b.interrupted_at
+        ? `${fmtDateTime(b.interrupted_at)} (terputus)`
+        : "Terputus"
+      : b.ended_at
+        ? fmtDateTime(b.ended_at)
+        : b.status === "active"
+          ? "Masih berjalan"
+          : "—";
   return `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Laporan Batch REMPAH</title>
 <style>
   body{font-family:system-ui,Segoe UI,sans-serif;color:#1c2b3a;padding:32px;}
@@ -406,11 +446,11 @@ function buildReportHtml(r, print) {
   @media print{body{padding:16px;}}
 </style></head><body>
   <h1>REMPAH — Laporan Batch</h1>
-  <div class="sub">${batchId} — ${deviceNameOf(b.device_id)} · Dibuat: ${createdLabel} · Status: ${b.status.toUpperCase()}</div>
+  <div class="sub">${batchId} — ${deviceNameOf(b.device_id)} · Dibuat: ${createdLabel} · Status: ${batchStatusLabel(b.status)}</div>
   <h2>Identitas &amp; Ringkasan</h2>
   <table>
     <tr><th>Mulai</th><td>${b.started_at ? fmtDateTime(b.started_at) : "—"}</td></tr>
-    <tr><th>Selesai</th><td>${b.ended_at ? fmtDateTime(b.ended_at) : b.status === "active" ? "Masih berjalan" : "—"}</td></tr>
+    <tr><th>Selesai</th><td>${endLabel}</td></tr>
     <tr><th>Durasi</th><td>${durationSec != null ? fmtDuration(durationSec) : "—"}</td></tr>
     <tr><th>Perkiraan Selesai (Input Operator)</th><td>${b.estimated_finish_at ? fmtDateTime(b.estimated_finish_at) : "—"}</td></tr>
     <tr><th>Massa Muatan</th><td>${b.charge_mass_kg ? fmtNum(b.charge_mass_kg) + " kg" : "—"}</td></tr>
@@ -513,7 +553,7 @@ onBeforeUnmount(() => clearInterval(timer));
         >
           <option v-for="b in batchOptions" :key="b.id" :value="b.id">
             {{ "#" + b.id.slice(0, 8).toUpperCase() }} —
-            {{ deviceNameOf(b.device_id) }} ({{ b.status
+            {{ deviceNameOf(b.device_id) }} ({{ batchStatusLabel(b.status)
             }}{{
               b.started_at
                 ? " · " + fmtDateTime(b.started_at).slice(0, 16)
@@ -527,7 +567,8 @@ onBeforeUnmount(() => clearInterval(timer));
             <span>Batch</span
             ><b
               >{{ "#" + report.batch.id.slice(0, 8).toUpperCase() }} ·
-              {{ deviceNameOf(report.batch.device_id) }}</b
+              {{ deviceNameOf(report.batch.device_id) }} ·
+              {{ batchStatusLabel(report.batch.status) }}</b
             >
           </div>
           <div class="preview-row">
@@ -537,11 +578,7 @@ onBeforeUnmount(() => clearInterval(timer));
                 report.batch.started_at
                   ? fmtDateTime(report.batch.started_at).slice(0, 16)
                   : "—"
-              }}{{
-                report.batch.ended_at
-                  ? " → " + fmtDateTime(report.batch.ended_at).slice(0, 16)
-                  : ""
-              }}</b
+              }}{{ previewEndLabel(report.batch) }}</b
             >
           </div>
           <div class="preview-row">

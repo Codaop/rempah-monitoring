@@ -18,7 +18,7 @@ export const mqttError = ref("");
 // Live store per device_id:
 // {
 //   device_id, received_at (Date.now browser), mode (dari state),
-//   total_drips (kumulatif, di-seed dari Supabase + delta live MQTT),
+//   total_drips (nilai drip_count terbaru dari broker — sudah kumulatif),
 //   telemetry: { boiler_temp_c, cooling_temp_c, gas_mass_kg, water_level, drip_count, flame_lit },
 //   sparks: { boiler_temp_c: [], cooling_temp_c: [], gas_mass_kg: [], drip_count: [] }  // ring buffer
 // }
@@ -67,14 +67,14 @@ function applyTelemetry(entry, msg) {
   }
   if (msg.water_level !== undefined) t.water_level = Number(msg.water_level);
   if (msg.flame_lit !== undefined) t.flame_lit = Boolean(msg.flame_lit);
-  // Penghitung tetesan (card TOTAL TETESAN). Firmware mengirim drip_count
-  // sebagai delta per interval 5 detik — akumulasi di sini di atas seed dari
-  // Supabase (seedDrips) agar total kumulatif bertahan melewati reload.
+  // Penghitung tetesan (card TOTAL TETESAN). drip_count dari broker sudah
+  // merupakan jumlah total tetesan yang dideteksi hardware — tampilkan apa
+  // adanya, JANGAN diakumulasi (revisi: sebelumnya dianggap delta).
   if (msg.drip_count !== undefined) {
     const n = Number(msg.drip_count);
-    if (Number.isFinite(n) && n > 0) {
+    if (Number.isFinite(n) && n >= 0) {
       t.drip_count = n;
-      entry.total_drips = (entry.total_drips || 0) + n;
+      entry.total_drips = n;
       pushSpark(entry.sparks.drip_count, n);
     }
   }
@@ -117,12 +117,10 @@ export function setAllowedDevices(deviceIds = []) {
   }
 }
 
-// Seed penghitung tetesan dari Supabase (sum drip_count batch aktif) agar
-// nilai kumulatif bertahan melewati reload. Dipanggil dashboard saat loadAll
-// SEBELUM connectMqtt — delta live lalu diakumulasi di atas seed ini.
-// Re-seed berkala (auto-refresh) tidak boleh MENURUNKAN counter: delta MQTT
-// yang belum sempat di-persist bridge bisa membuat sum DB lebih kecil dari
-// nilai live — pakai max agar hanya menaikkan.
+// Seed baseline penghitung tetesan dari Supabase (nilai drip_count terakhir
+// batch aktif) agar card tidak sempat menampilkan 0 saat baru load/before
+// pesan live pertama tiba. Pesan live berikutnya MENGGANTI (bukan menambah)
+// nilai ini; Math.max menjaga agar baseline tidak menurunkan nilai live.
 export function seedDrips(deviceId, total) {
   const entry = ensureEntry(deviceId);
   entry.total_drips = Math.max(entry.total_drips || 0, Number(total) || 0);
@@ -196,4 +194,21 @@ export function disconnectMqtt() {
     client = null;
   }
   mqttStatus.value = "idle";
+}
+
+// Kirim command langsung ke perangkat via broker MQTT (aksi firmware:
+// "mulai"/"mati"). Jalur langsung memangkas latensi menunggu poll bridge;
+// riwayat/lifecycle command tetap dicatat lewat Supabase, dan firmware
+// idempoten terhadap "mulai" ganda sehingga pengiriman dobel aman.
+export function publishCommand(deviceId, action) {
+  if (!client || mqttStatus.value !== "connected") {
+    console.warn(
+      `[REMPAH] MQTT belum terhubung — "${action}" untuk ${String(deviceId).slice(0, 8)} tidak dikirim langsung (bridge tetap meneruskan lewat Supabase).`
+    );
+    return false;
+  }
+  client.publish(`rempah/${deviceId}/command`, JSON.stringify({ action }), {
+    qos: 1,
+  });
+  return true;
 }

@@ -69,6 +69,17 @@ class Bridge:
         if command.action in _ESTOP_ACTIONS:
             self._forward(command)
             return
+        if command.action == "RESUME_BATCH":
+            # Ticket 59: murni operasi DB — batch interrupted dikembalikan ke
+            # active tanpa menyentuh perangkat (firmware tidak mengenal
+            # RESUME_BATCH). POWER_ON dikirim dashboard terpisah. Tidak ada
+            # round-trip MQTT, jadi status langsung succeeded kalau ada batch
+            # interrupted, rejected kalau tidak.
+            resumed = self.db.resume_interrupted_batch(command.device_id)
+            self.db.mark_command(
+                command.id, "succeeded" if resumed else "rejected"
+            )
+            return
         current = self.db.device_state(command.device_id)
         if current.mode == command.expected_state:
             self._forward(command)
@@ -144,3 +155,9 @@ class Bridge:
             last_seen = self.db.get_last_seen(device_id)
             if last_seen is not None and now - last_seen > self.offline_after_s:
                 self.db.set_offline(device_id, True)
+                # Mesin mati mendadak / disconnect (ticket 58): batch active
+                # yang perangkatnya diam > ambang offline ditandai interrupted
+                # agar tidak "nyangkut" sebagai active selamanya. Idempoten —
+                # hanya menyentuh batch ber-status active.
+                ts = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
+                self.db.interrupt_active_batch(device_id, ts)

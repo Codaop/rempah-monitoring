@@ -32,6 +32,9 @@ class FakeDb:
         self.estimates: List[dict] = []
         self.batch_opens: List[Tuple[str, str]] = []
         self.batch_closes: List[Tuple[str, str]] = []
+        self.batch_interrupts: List[Tuple[str, str]] = []
+        self.batch_resumes: List[str] = []
+        self.resume_result = True
         self.first_contacts: List[Tuple[str, str]] = []
         self.unknown_messages: List[dict] = []
 
@@ -87,6 +90,13 @@ class FakeDb:
 
     def close_active_batch(self, device_id: str, ts: str) -> None:
         self.batch_closes.append((device_id, ts))
+
+    def interrupt_active_batch(self, device_id: str, ts: str) -> None:
+        self.batch_interrupts.append((device_id, ts))
+
+    def resume_interrupted_batch(self, device_id: str) -> bool:
+        self.batch_resumes.append(device_id)
+        return self.resume_result
 
     def purge_old_sensor_logs(self) -> None:
         pass
@@ -144,6 +154,35 @@ def test_dashboard_emergency_stop_action_name_is_always_forwarded(mqtt: FakeMqtt
     assert mqtt.published == [
         ("rempah/d1/command", {"command_id": "c10", "action": "mati"})
     ]
+
+
+def test_resume_batch_flips_batch_back_to_active_without_mqtt(mqtt: FakeMqtt) -> None:
+    """RESUME_BATCH murni operasi DB: batch interrupted → active (ticket 59)."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c11", device_id="d1", action="RESUME_BATCH")
+
+    bridge.process_command(command)
+
+    assert db.batch_resumes == ["d1"]
+    # Firmware tidak mengenal RESUME_BATCH → tidak ada publish MQTT.
+    assert mqtt.published == []
+    # Operasi DB selesai seketika → status langsung succeeded.
+    assert db.status_updates == [("c11", "succeeded")]
+
+
+def test_resume_batch_without_interrupted_batch_is_rejected(mqtt: FakeMqtt) -> None:
+    """Tidak ada batch interrupted → RESUME_BATCH ditolak, tanpa publish."""
+    db = FakeDb(DeviceState(device_id="d1", mode="IDLE"))
+    db.resume_result = False
+    bridge = Bridge(mqtt=mqtt, db=db)
+    command = Command(id="c12", device_id="d1", action="RESUME_BATCH")
+
+    bridge.process_command(command)
+
+    assert db.batch_resumes == ["d1"]
+    assert mqtt.published == []
+    assert db.status_updates == [("c12", "rejected")]
 
 
 def test_forwarded_command_is_marked_dispatched(mqtt: FakeMqtt) -> None:
@@ -281,6 +320,10 @@ def test_device_silent_for_over_a_minute_is_flagged_offline(mqtt: FakeMqtt) -> N
     bridge.check_offline()
 
     assert db.offline_flags == [("d1", True)]
+    # Ticket 58: device diam > ambang offline → batch active ikut ditandai
+    # interrupted (idempoten via adapter).
+    assert len(db.batch_interrupts) == 1
+    assert db.batch_interrupts[0][0] == "d1"
 
 
 def test_device_seen_recently_stays_online(mqtt: FakeMqtt) -> None:
@@ -290,6 +333,7 @@ def test_device_seen_recently_stays_online(mqtt: FakeMqtt) -> None:
     bridge.check_offline()
 
     assert db.offline_flags == []
+    assert db.batch_interrupts == []
 
 
 def test_estimated_yield_accumulates_from_drips(mqtt: FakeMqtt) -> None:
