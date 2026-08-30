@@ -305,14 +305,16 @@ async function submitYield() {
   yieldBusy.value = true;
   yieldError.value = "";
   try {
-    // Rendemen = volume minyak (ml) / berat bahan baku (kg) → ml/kg
-    const rendemen = vol / chargeKg;
+    // Rendemen (%) = berat minyak atsiri / berat bahan baku × 100%
+    // Berat minyak atsiri = nilai ml yang diisi operator (1 ml = 1 g),
+    // berat bahan baku dari charge batch (kg → g).
+    const rendemenPct = (vol / (chargeKg * 1000)) * 100;
     const { error } = await supabase.from("batch_logs").upsert(
       {
         batch_id: r.batch.id,
         producer_id: r.batch.producer_id,
         oil_volume_ml: vol,
-        yield_rendemen_ml_per_kg: rendemen,
+        yield_rendemen_pct: rendemenPct,
         yield_recorded_at: new Date().toISOString(),
       },
       { onConflict: "batch_id" }
@@ -420,8 +422,8 @@ function buildReportHtml(r, print) {
   const oilVolume =
     log.oil_volume_ml != null ? fmtNum(log.oil_volume_ml) + " ml" : "—";
   const rendemen =
-    log.yield_rendemen_ml_per_kg != null
-      ? fmtNum(log.yield_rendemen_ml_per_kg) + " ml/kg"
+    log.yield_rendemen_pct != null
+      ? fmtNum(log.yield_rendemen_pct) + " %"
       : "—";
   // Batch terputus: baris "Selesai" jujur — pakai interrupted_at + label.
   const endLabel =
@@ -616,8 +618,8 @@ onBeforeUnmount(() => clearInterval(timer));
           <div class="preview-row">
             <span>Rendemen</span
             ><b>{{
-              report.log?.yield_rendemen_ml_per_kg != null
-                ? fmtNum(report.log.yield_rendemen_ml_per_kg) + " ml/kg"
+              report.log?.yield_rendemen_pct != null
+                ? fmtNum(report.log.yield_rendemen_pct) + " %"
                 : "—"
             }}</b>
           </div>
@@ -781,7 +783,8 @@ onBeforeUnmount(() => clearInterval(timer));
       </div>
       <p v-if="report?.batch?.charge_mass_kg" class="muted calc-hint">
         Berat bahan baku: {{ fmtNum(report.batch.charge_mass_kg) }} kg —
-        rendemen = volume (ml) ÷ berat (kg)
+        rendemen (%) = berat minyak (ml ≈ g) ÷ berat bahan baku (kg × 1000) ×
+        100
       </p>
       <p v-if="yieldError" class="note note-err">{{ yieldError }}</p>
       <template #actions>
