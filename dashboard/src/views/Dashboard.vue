@@ -59,33 +59,38 @@ const selectedDevice = computed(() => devices.value[selectedIdx.value] || null);
 const activeDeviceId = computed(() => selectedDevice.value?.id || null);
 
 // ── Penghitung tetesan (card TOTAL TETESAN) ────────────────────────────────
-// drip_count dari broker/DB sudah merupakan jumlah total tetesan yang
-// dideteksi hardware — ditampilkan apa adanya (tidak diakumulasi).
-const dripDbTotal = ref(null); // jalur DB (fallback): nilai drip_count terakhir
+// drip_count dari broker sudah merupakan jumlah total tetesan yang dideteksi
+// hardware — ditampilkan apa adanya (tidak diakumulasi). Sesuai tiket 65,
+// card HANYA menampilkan data yang benar-benar datang dari broker: tanpa data
+// live segar, card menampilkan 0 (tidak ada fallback ke riwayat DB).
 const batchDeviceId = computed(() => batch.value?.device_id || null);
-const batchLiveEntry = computed(() =>
-  batchDeviceId.value ? liveByDevice[batchDeviceId.value] : null
+// Device yang datanya ditampilkan card tetesan: batch aktif jika ada, selain
+// itu perangkat terpilih. Kebasahan dicek pada entri live device yang sama.
+const dripDeviceId = computed(
+  () => batchDeviceId.value || activeDeviceId.value || null
 );
+const dripLiveEntry = computed(() =>
+  dripDeviceId.value ? liveByDevice[dripDeviceId.value] : null
+);
+const dripFresh = computed(() => {
+  const e = dripLiveEntry.value;
+  return !!(e && e.received_at && Date.now() - e.received_at < OFFLINE_MS);
+});
 const dripValue = computed(() => {
-  // Prioritas 1: jalur live MQTT — total tetesan perangkat (kumulatif). Tidak
-  // wajib ada batch aktif: kalau broker mengirim data drip, card menampilkan.
-  if (mqttStatus.value === "connected") {
-    const devId = batchDeviceId.value || activeDeviceId.value;
-    const e = devId ? liveByDevice[devId] : null;
-    if (e && e.total_drips != null) return fmtNum(e.total_drips, 0);
+  if (
+    mqttStatus.value === "connected" &&
+    dripFresh.value &&
+    dripLiveEntry.value?.total_drips != null
+  ) {
+    return fmtNum(dripLiveEntry.value.total_drips, 0);
   }
-  // Prioritas 2: fallback DB (nilai drip_count terakhir) saat MQTT mati.
-  return dripDbTotal.value != null ? fmtNum(dripDbTotal.value, 0) : "—";
+  return "0";
 });
 const sparkDrips = computed(() => {
-  if (mqttStatus.value === "connected") {
-    const devId = batchDeviceId.value || activeDeviceId.value;
-    const s = devId ? liveByDevice[devId]?.sparks?.drip_count : null;
-    if (s && s.length) return s;
+  if (mqttStatus.value === "connected" && dripFresh.value) {
+    return dripLiveEntry.value?.sparks?.drip_count || [];
   }
-  return deviceHistory.value
-    .slice(-SPARK_POINTS)
-    .map((r) => Number(r.drip_count) || 0);
+  return [];
 });
 
 // Riwayat & metrik mengikuti perangkat terpilih (ticket 37) — setiap still
@@ -95,6 +100,9 @@ const deviceHistory = computed(() =>
     ? history.value.filter((r) => r.device_id === activeDeviceId.value)
     : []
 );
+// latest: saat live segar → nilai telemetry live; saat basi/putus → 0 (bukan
+// fallback riwayat DB). Sesuai tiket 65: card menampilkan 0 ketika tidak ada
+// data segar dari broker.
 const latest = computed(() => {
   if (useLive.value && liveEntry.value) {
     const e = liveEntry.value;
@@ -104,14 +112,25 @@ const latest = computed(() => {
       ts: e.received_at ? new Date(e.received_at).toISOString() : null,
     };
   }
-  return deviceHistory.value[deviceHistory.value.length - 1] || {};
+  // Data basi / MQTT terputus → kembalikan 0 untuk semua metric numerik
+  return {
+    boiler_temp_c: 0,
+    gas_mass_kg: 0,
+    cooling_temp_c: 0,
+    water_level: 0,
+    drip_count: 0,
+    flame_lit: false,
+    mode: null,
+    ts: null,
+  };
 });
 // Sparkline hanya menampilkan jendela pendek (60 titik terakhir) — jendela
 // penuh 240 titik membuat pergerakan tiap tick hanya ~1px sehingga chart
 // terlihat beku walau re-render tepat waktu.
 const SPARK_POINTS = 60;
 // Jalur live MQTT (ticket 01–03): saat browser terhubung langsung ke broker,
-// nilai & sparkline diambil dari store live; fallback ke riwayat Supabase.
+// nilai & sparkline diambil dari store live; TIDAK ADA fallback ke riwayat
+// Supabase (tiket 65: card menampilkan 0 & sparkline kosong saat data basi).
 const liveEntry = computed(() =>
   activeDeviceId.value ? liveByDevice[activeDeviceId.value] : null
 );
@@ -123,9 +142,9 @@ const useLive = computed(
   () => mqttStatus.value === "connected" && liveFresh.value
 );
 function pickSpark(deviceId, key) {
-  const s = useLive.value ? liveByDevice[deviceId]?.sparks?.[key] : null;
-  if (s && s.length) return s;
-  return deviceHistory.value.slice(-SPARK_POINTS).map((r) => r[key]);
+  if (!useLive.value) return [];
+  const s = liveByDevice[deviceId]?.sparks?.[key];
+  return s && s.length ? s : [];
 }
 const sparkTemp = computed(() =>
   pickSpark(activeDeviceId.value, "boiler_temp_c")
@@ -302,7 +321,7 @@ async function loadAll() {
 
   // Seed penghitung tetesan: nilai drip_count TERAKHIR batch aktif dari
   // Supabase — bukan SUM, karena tiap baris sudah bernilai kumulatif.
-  dripDbTotal.value = null;
+  // (Tiket 65: dripDbTotal dihapus — card tidak pakai fallback riwayat DB)
   if (batch.value) {
     const { data: drips } = await supabase
       .from("sensor_logs")
@@ -311,7 +330,6 @@ async function loadAll() {
       .order("ts", { ascending: false })
       .limit(1);
     const latest = Number(drips?.[0]?.drip_count) || 0;
-    dripDbTotal.value = latest;
     seedDrips(batch.value.device_id, latest);
   }
   history.value = (histRes.data || []).reverse();
@@ -359,7 +377,6 @@ async function refreshCards() {
     if (seedRes.data && batchId) {
       // Nilai terakhir sudah kumulatif — ganti, bukan tambah.
       const latest = Number(seedRes.data?.[0]?.drip_count) || 0;
-      dripDbTotal.value = latest;
       seedDrips(batch.value.device_id, latest);
     }
     lastSyncAt.value = new Date().toISOString();
@@ -386,11 +403,7 @@ onMounted(async () => {
         const row = payload.new;
         // Nilai drip_count sudah kumulatif — tampilkan nilai terbaru saja,
         // jangan diakumulasi (revisi logika card tetesan).
-        if (mqttStatus.value !== "connected") {
-          if (row.drip_count !== undefined && row.drip_count !== null) {
-            dripDbTotal.value = Number(row.drip_count);
-          }
-        }
+        // (Tiket 65: dripDbTotal dihapus — card tidak pakai fallback riwayat DB)
         if (activeDeviceId.value && row.device_id === activeDeviceId.value) {
           const seen = history.value.some((r) => r.id === row.id);
           if (!seen) {
@@ -518,7 +531,6 @@ onMounted(async () => {
           if (batch.value?.id === nb.id) {
             batch.value = null;
             batchLog.value = null;
-            dripDbTotal.value = null;
           }
           interruptedBatch.value = nb;
         } else {
@@ -526,7 +538,6 @@ onMounted(async () => {
           if (batch.value?.id === nb.id) {
             batch.value = null;
             batchLog.value = null;
-            dripDbTotal.value = null;
           }
           if (interruptedBatch.value?.id === nb.id) {
             interruptedBatch.value = null;
@@ -843,11 +854,9 @@ function startNewBatchInstead() {
           :data="sparkDrips"
           color="#3a7ca5"
           :hint="
-            mqttStatus === 'connected'
+            mqttStatus === 'connected' && dripFresh
               ? 'Total tetesan perangkat (live)'
-              : dripDbTotal != null
-                ? 'Total tetesan (riwayat terakhir)'
-                : 'Menunggu data perangkat'
+              : 'Menunggu data perangkat'
           "
         >
           <template #icon>
