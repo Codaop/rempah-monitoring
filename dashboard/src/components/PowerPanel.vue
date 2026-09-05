@@ -47,6 +47,13 @@ const isPoweredOn = computed(() => {
   return mode && mode !== "IDLE" && mode !== "ESTOP";
 });
 
+const isDeviceOnline = computed(() => {
+  const d = selectedDevice.value;
+  if (!d) return false;
+  const ms = offlineSince(d.last_seen_at);
+  return ms >= 0 && ms < OFFLINE_MS;
+});
+
 const maxTravel = computed(() => Math.max(0, trackW.value - CIRCLE - PAD * 2));
 
 // Posisi lingkaran: kanan saat ON, kiri saat OFF; bebas selama drag.
@@ -72,7 +79,7 @@ onMounted(() => {
 onBeforeUnmount(() => ro && ro.disconnect());
 
 function onDragStart(e) {
-  if (busy.value || !selectedDevice.value) return;
+  if (busy.value || !selectedDevice.value || !isDeviceOnline.value) return;
   dragging.value = true;
   moved.value = false;
   dragStartX.value = e.clientX;
@@ -109,7 +116,7 @@ function onDragEnd() {
 
 // ── Perintah daya ───────────────────────────────────────────────────────────
 async function sendCommand(action, expectedState) {
-  if (!selectedDevice.value) return;
+  if (!selectedDevice.value || !isDeviceOnline.value) return;
   busy.value = true;
   note.value = "";
   try {
@@ -146,6 +153,7 @@ function requestPowerOff() {
 }
 
 function togglePower() {
+  if (!isDeviceOnline.value) return;
   if (isPoweredOn.value) requestPowerOff();
   else sendCommand("POWER_ON", "IDLE");
 }
@@ -177,7 +185,11 @@ function selectDevice(idx) {
     <div
       ref="trackEl"
       class="toggle-row"
-      :class="{ on: isPoweredOn, disabled: busy || !selectedDevice, dragging }"
+      :class="{
+        on: isPoweredOn,
+        disabled: busy || !selectedDevice || !isDeviceOnline,
+        dragging,
+      }"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -243,7 +255,7 @@ function selectDevice(idx) {
 
     <button
       class="btn-estop"
-      :disabled="busy || !selectedDevice"
+      :disabled="busy || !selectedDevice || !isDeviceOnline"
       @click="askEstop"
     >
       Emergency Stop
