@@ -84,7 +84,7 @@ async function loadLog() {
   const out = [];
   for (const s of sensorRes.data || []) {
     const temp = Number(s.boiler_temp_c);
-    const warn = temp > 98 ? "DANGER" : temp > 92 ? "WARNING" : "OK";
+    const warn = temp > 105 ? "DANGER" : "OK";
     out.push(
       toRow({
         time: s.ts,
@@ -100,9 +100,10 @@ async function loadLog() {
         category: "sensor",
         event: `Massa Gas`,
         value: `${fmtNum(s.gas_mass_kg)} kg`,
-        // Sensor beban: massa tabung menurun saat gas terpakai. Ambang default
-        // untuk tabung LPG 15 kg (tare ~14 kg) — sesuaikan dengan alat.
-        status: Number(s.gas_mass_kg) < 15 ? "DANGER" : "OK",
+        // Sensor beban: massa tabung menurun saat gas terpakai. Ambang danger
+        // ketika massa < 4 kg — hasil kalibrasi terbaca ±7 kg mendekati berat
+        // asli tabung (bukan massa LPG 15 kg penuh).
+        status: Number(s.gas_mass_kg) < 4 ? "DANGER" : "OK",
       })
     );
   }
@@ -372,7 +373,7 @@ function batchEventsHtml(r) {
   for (const s of sensorSample) {
     const temp = Number(s.boiler_temp_c);
     if (Number.isFinite(temp)) {
-      const warn = temp > 98 ? "DANGER" : temp > 92 ? "WARNING" : "OK";
+      const warn = temp > 105 ? "DANGER" : "OK";
       rowsHtml.push(
         `<tr><td>${fmtDateTime(s.ts)}</td><td>Lonjakan Suhu Boiler</td><td>${fmtNum(temp)} °C</td><td>${warn}</td></tr>`
       );
@@ -380,7 +381,7 @@ function batchEventsHtml(r) {
     const gas = Number(s.gas_mass_kg);
     if (Number.isFinite(gas)) {
       rowsHtml.push(
-        `<tr><td>${fmtDateTime(s.ts)}</td><td>Massa Gas</td><td>${fmtNum(gas)} kg</td><td>${gas < 15 ? "DANGER" : "OK"}</td></tr>`
+        `<tr><td>${fmtDateTime(s.ts)}</td><td>Massa Gas</td><td>${fmtNum(gas)} kg</td><td>${gas < 4 ? "DANGER" : "OK"}</td></tr>`
       );
     }
   }

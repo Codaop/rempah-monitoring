@@ -213,7 +213,7 @@ function pushAlert(level, tag, message, at) {
 }
 
 function checkThresholds(row) {
-  if (Number(row.boiler_temp_c) > 98)
+  if (Number(row.boiler_temp_c) > 105)
     pushAlert(
       "danger",
       "SUHU",
