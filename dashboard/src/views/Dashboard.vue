@@ -41,6 +41,7 @@ const batchLog = ref(null);
 const history = ref([]); // semua telemetry (multi-device)
 const alerts = ref([]);
 const refreshPrompt = ref("");
+const lastMessageAt = ref(null); // terakhir kali terima pesan MQTT dari broker
 
 // ── Resume batch terputus (ticket 60) ───────────────────────────────────────
 // Saat device kembali online & ada batch interrupted, modal konfirmasi muncul:
@@ -180,7 +181,16 @@ const dataFlowing = computed(() => {
 });
 
 // Indikator jalur data live di header (ticket 01).
+const isReconnecting = computed(() => {
+  if (!lastMessageAt.value) return false;
+  const age = Date.now() - new Date(lastMessageAt.value).getTime();
+  const staleData = age > REFRESH_MS; // 10 detik
+  // Reconnecting jika: >10s tidak ada data + status MQTT bukan connected (atau connecting)
+  return staleData && (mqttStatus.value !== "connected" || mqttStatus.value === "connecting");
+});
+
 const mqttLabel = computed(() => {
+  if (isReconnecting.value) return "MQTT Menghubungkan…";
   if (mqttStatus.value === "connected")
     return useLive.value ? "MQTT Live" : "MQTT Terhubung";
   if (mqttStatus.value === "connecting") return "MQTT Menghubungkan…";
@@ -191,10 +201,16 @@ const mqttDotClass = computed(() => {
   if (mqttStatus.value === "connected") return "dot-ok";
   if (mqttStatus.value === "connecting" || mqttStatus.value === "reconnecting")
     return "dot-warn";
+  if (isReconnecting.value) return "dot-warn";
   return "dot-off";
 });
 
+const hasOnlineDevice = computed(() => 
+  devices.value.some(d => sensorOnline.value)
+);
+
 const statusSubtitle = computed(() => {
+  if (isReconnecting.value) return "Menunggu data dari broker MQTT (10+ detik)";
   if (batch.value) return `Status sistem optimal. Batch aktif sedang berjalan.`;
   if (dataFlowing.value)
     return "Tidak ada batch aktif. Nilai di bawah real-time dari perangkat.";
@@ -335,6 +351,20 @@ async function loadAll() {
   history.value = (histRes.data || []).reverse();
   loading.value = false;
 
+  // TAMBAHAN: deteksi device mati (>1 menit tidak menerima data)
+  const deadDevices = devices.value.filter((d) => {
+    if (!d.last_seen_at) return false;
+    const ms = offlineSince(d.last_seen_at);
+    return ms >= OFFLINE_MS;
+  });
+  if (deadDevices.length > 0 && alerts.value.length === 0) {
+    pushAlert(
+      "warn",
+      "SISTEM",
+      `${deadDevices.length} perangkat mati (>1 menit tidak data dari broker)`
+    );
+  }
+
   const hasState = alerts.value.length === 0;
   if (hasState) {
     history.value
@@ -379,6 +409,7 @@ async function refreshCards() {
       const latest = Number(seedRes.data?.[0]?.drip_count) || 0;
       seedDrips(batch.value.device_id, latest);
     }
+    lastMessageAt.value = new Date().toISOString();
     lastSyncAt.value = new Date().toISOString();
   } catch (err) {
     console.warn("[REMPAH] Refresh card gagal:", err);
@@ -412,6 +443,8 @@ onMounted(async () => {
             checkThresholds(row);
           }
         }
+        // TAMBAHAN: track terakhir kali terima pesan dari broker MQTT
+        lastMessageAt.value = new Date().toISOString();
       }
     )
     .on(
@@ -610,13 +643,19 @@ async function refreshState() {
 
 // ── Resume batch terputus (ticket 60) ───────────────────────────────────────
 // Modal muncul saat device pemilik batch interrupted kembali online dan nasib
-// batch itu belum diputuskan di sesi ini (dismiss/resume/batch baru).
+// batch itu belum diputuskan di sesi ini (dismiss/resume/baru).
 const resumeDeviceOnline = computed(() => {
   const b = interruptedBatch.value;
   if (!b) return false;
   const d = devices.value.find((x) => x.id === b.device_id);
   if (!d) return false;
-  const ms = offlineSince(d.last_seen_at);
+  // Gunakan lastMessageAt jika ada (tracking broker MQTT), else fallback ke last_seen_at
+  let ms;
+  if (lastMessageAt.value) {
+    ms = Date.now() - new Date(lastMessageAt.value).getTime();
+  } else {
+    ms = offlineSince(d.last_seen_at);
+  }
   return ms >= 0 && ms < OFFLINE_MS;
 });
 
@@ -732,25 +771,7 @@ function startNewBatchInstead() {
           <span class="dot-status" :class="mqttDotClass"></span>
           {{ mqttLabel }}
         </span>
-        <span
-          class="status-pill"
-          :title="`Sinkronisasi otomatis dari Supabase setiap ${REFRESH_MS / 1000} detik`"
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-            <polyline points="21 3 21 9 15 9" />
-          </svg>
-          Auto-refresh · {{ lastSyncAt ? fmtTime(lastSyncAt) : "…" }}
-        </span>
+        
       </div>
     </div>
 
@@ -956,14 +977,14 @@ function startNewBatchInstead() {
         </button>
         <button
           class="btn btn-ghost"
-          :disabled="resumeBusy"
+          :disabled="resumeBusy || !hasOnlineDevice.value"
           @click="startNewBatchInstead"
         >
           Mulai Batch Baru
         </button>
         <button
           class="btn btn-primary"
-          :disabled="resumeBusy"
+          :disabled="resumeBusy || !hasOnlineDevice.value"
           @click="resumeInterruptedBatch"
         >
           {{ resumeBusy ? "Mengirim…" : "Lanjutkan Batch" }}

@@ -515,35 +515,7 @@ onBeforeUnmount(() => clearInterval(timer));
           Visualisasi data komprehensif tentang kinerja sistem dan log
         </p>
       </div>
-      <div class="status-badges">
-        <span class="status-pill">
-          <span
-            class="dot-status"
-            :class="anyDeviceOnline ? 'dot-ok' : 'dot-off'"
-          ></span>
-          Perangkat {{ anyDeviceOnline ? "Online" : "Offline" }}
-        </span>
-        <span class="status-pill">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-          >
-            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
-            <path d="M1.42 9a16 16 0 0 1 21.16 0" />
-            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-            <line x1="12" y1="20" x2="12.01" y2="20" />
-          </svg>
-          {{ dataFlowing ? "Data Mengalir" : "Menunggu Data" }}
-        </span>
-      </div>
-    </div>
-
-    <!-- Top section: 2 columns -->
+      <!-- Top section: 2 columns -->
     <div class="top-grid">
       <!-- Left: PDF Report card -->
       <div class="card report-card">
