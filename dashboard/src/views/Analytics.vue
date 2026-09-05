@@ -515,7 +515,8 @@ onBeforeUnmount(() => clearInterval(timer));
           Visualisasi data komprehensif tentang kinerja sistem dan log
         </p>
       </div>
-      <!-- Top section: 2 columns -->
+    </div>
+    <!-- Top section: 2 columns -->
     <div class="top-grid">
       <!-- Left: PDF Report card -->
       <div class="card report-card">
