@@ -95,19 +95,24 @@ class FakeClient:
         self._batch_rows = batch_rows or []
         self._device_rows = device_rows or []
         self._sensor_rows = sensor_rows or []
-        self.tables: dict[str, FakeQuery] = {}
+        self._last_query: dict[str, FakeQuery] = {}
 
     def table(self, name: str) -> FakeQuery:
-        if name not in self.tables:
-            if name == "batches":
-                self.tables[name] = FakeQuery(self._batch_rows, null_on_empty=True)
-            elif name == "devices":
-                self.tables[name] = FakeQuery(self._device_rows, null_on_empty=True)
-            elif name == "sensor_logs":
-                self.tables[name] = FakeQuery(self._sensor_rows, null_on_empty=True)
-            else:
-                self.tables[name] = FakeQuery(null_on_empty=True)
-        return self.tables[name]
+        # Return fresh FakeQuery each time to avoid state pollution
+        # But track the last one for test assertions
+        if name == "batches":
+            q = FakeQuery(self._batch_rows, null_on_empty=True)
+        elif name == "devices":
+            q = FakeQuery(self._device_rows, null_on_empty=True)
+        elif name == "sensor_logs":
+            q = FakeQuery(self._sensor_rows, null_on_empty=True)
+        else:
+            q = FakeQuery(null_on_empty=True)
+        self._last_query[name] = q
+        return q
+
+    def last_query(self, name: str) -> FakeQuery:
+        return self._last_query.get(name)
 
 
 def _adapter(batch_rows=None, device_rows=None, sensor_rows=None) -> tuple[SupabaseDbAdapter, FakeClient]:
@@ -124,7 +129,7 @@ def test_insert_telemetry_without_active_batch_stores_row_with_null_batch() -> N
 
     adapter.insert_telemetry("d1", payload)
 
-    inserted = client.tables["sensor_logs"].inserted
+    inserted = client.last_query("sensor_logs").inserted
     assert inserted is not None
     assert inserted["device_id"] == "d1"
     assert inserted["producer_id"] == "p1"
@@ -141,7 +146,7 @@ def test_insert_telemetry_with_active_batch_stores_batch_id() -> None:
 
     adapter.insert_telemetry("d1", payload)
 
-    inserted = client.tables["sensor_logs"].inserted
+    inserted = client.last_query("sensor_logs").inserted
     assert inserted["batch_id"] == "b1"
 
 
@@ -152,7 +157,7 @@ def test_update_estimate_is_skipped_without_active_batch() -> None:
 
     adapter.update_estimate("d1", 0.01, "2026-08-13T10:00:00Z")
 
-    assert "batch_logs" not in client.tables or not client.tables["batch_logs"].inserted
+    q = client.last_query("batch_logs"); assert q is None or not q.inserted
 
 
 def test_device_state_defaults_to_idle_when_row_missing() -> None:
@@ -170,7 +175,7 @@ def test_note_first_contact_handles_missing_device_row() -> None:
 
     adapter.note_first_contact("d1", 1234567890.0)
 
-    assert "alerts" not in client.tables or not client.tables["alerts"].inserted
+    q = client.last_query("alerts"); assert q is None or not q.inserted
 
 
 def test_open_pending_batch_handles_missing_row() -> None:
@@ -211,7 +216,7 @@ def test_close_active_batch_records_gas_usage() -> None:
 
     adapter.close_active_batch("d1", "2026-08-13T11:00:00Z")
 
-    log = client.tables["batch_logs"].inserted
+    log = client.last_query("batch_logs").inserted
     assert log is not None
     assert log["gas_start_kg"] == 28.6
     assert log["gas_end_kg"] == 27.9
@@ -237,7 +242,7 @@ def test_close_active_batch_gas_usage_none_when_no_gas_data() -> None:
 
     adapter.close_active_batch("d1", "2026-08-13T11:00:00Z")
 
-    log = client.tables["batch_logs"].inserted
+    log = client.last_query("batch_logs").inserted
     assert log is not None
     assert log["gas_start_kg"] is None
     assert log["gas_end_kg"] is None
@@ -253,7 +258,7 @@ def test_interrupt_active_batch_marks_batch_interrupted() -> None:
 
     adapter.interrupt_active_batch("d1", "2026-08-13T11:00:00Z")
 
-    updated = client.tables["batches"].updated
+    updated = client.last_query("batches").updated
     assert updated is not None
     assert updated["status"] == "interrupted"
     assert updated["interrupted_at"] == "2026-08-13T11:00:00Z"
@@ -268,7 +273,7 @@ def test_interrupt_active_batch_idempotent_without_active_batch() -> None:
 
     adapter.interrupt_active_batch("d1", "2026-08-13T11:00:00Z")
 
-    assert client.tables["batches"].updated is None
+    assert client.last_query("batches").updated is None
 
 
 def test_interrupt_active_batch_no_active_batch_noop() -> None:
@@ -279,7 +284,7 @@ def test_interrupt_active_batch_no_active_batch_noop() -> None:
 
     adapter.interrupt_active_batch("d1", "2026-08-13T11:00:00Z")
 
-    assert client.tables["batches"].updated is None
+    assert client.last_query("batches").updated is None
 
 
 def test_resume_interrupted_batch_marks_batch_active() -> None:
@@ -292,7 +297,7 @@ def test_resume_interrupted_batch_marks_batch_active() -> None:
     resumed = adapter.resume_interrupted_batch("d1")
 
     assert resumed is True
-    updated = client.tables["batches"].updated
+    updated = client.last_query("batches").updated
     assert updated is not None
     assert updated["status"] == "active"
     assert updated["interrupted_at"] is None
@@ -307,7 +312,7 @@ def test_resume_interrupted_batch_keeps_started_at_untouched() -> None:
 
     adapter.resume_interrupted_batch("d1")
 
-    updated = client.tables["batches"].updated
+    updated = client.last_query("batches").updated
     assert updated is not None
     assert "started_at" not in updated  # tidak disentuh sama sekali
 
@@ -322,4 +327,109 @@ def test_resume_interrupted_batch_returns_false_without_interrupted_batch() -> N
     resumed = adapter.resume_interrupted_batch("d1")
 
     assert resumed is False
-    assert client.tables["batches"].updated is None
+    assert client.last_query("batches").updated is None
+
+
+def test_upsert_pending_batch_from_device_creates_new_batch() -> None:
+    """Device mengirim 'mulai' dengan berat_muatan → create pending batch dengan charge_source=device."""
+    adapter, client = _adapter(
+        device_rows=[{"id": "d1", "producer_id": "p1"}],
+    )
+
+    success = adapter.upsert_pending_batch_from_device("d1", 2.5, "2026-08-13T10:00:00Z")
+
+    assert success is True
+    inserted = client.last_query("batches").inserted
+    assert inserted is not None
+    assert inserted["device_id"] == "d1"
+    assert inserted["producer_id"] == "p1"
+    assert inserted["charge_mass_kg"] == 2.5
+    assert inserted["status"] == "pending"
+    assert inserted["charge_source"] == "device"
+    assert inserted["created_at"] == "2026-08-13T10:00:00Z"
+    assert inserted["updated_at"] == "2026-08-13T10:00:00Z"
+
+
+def test_upsert_pending_batch_from_device_updates_existing_pending() -> None:
+    """Dashboard sudah create pending batch → device update charge_mass_kg (device wins)."""
+    adapter, client = _adapter(
+        batch_rows=[
+            {"id": "b1", "device_id": "d1", "status": "pending", "charge_mass_kg": 1.0, "charge_source": "dashboard"}
+        ],
+        device_rows=[{"id": "d1", "producer_id": "p1"}],
+    )
+
+    success = adapter.upsert_pending_batch_from_device("d1", 3.5, "2026-08-13T11:00:00Z")
+
+    assert success is True
+    updated = client.last_query("batches").updated
+    assert updated is not None
+    assert updated["charge_mass_kg"] == 3.5
+    assert updated["charge_source"] == "device"
+    assert updated["updated_at"] == "2026-08-13T11:00:00Z"
+    # created_at tidak diubah
+
+
+def test_upsert_pending_batch_from_device_unknown_device_returns_false() -> None:
+    """Device tidak dikenal di tabel devices → False, tidak create batch."""
+    adapter, client = _adapter(device_rows=[])
+
+    success = adapter.upsert_pending_batch_from_device("unknown", 2.5, "2026-08-13T10:00:00Z")
+
+    assert success is False
+    q = client.last_query("batches")
+    assert q is None  # batches table never accessed
+
+
+def test_upsert_pending_batch_from_device_handles_missing_charge_source_column() -> None:
+    """Jika kolom charge_source belum ada di DB, fallback tanpa charge_source (graceful degradation)."""
+    # Shared state to track calls across multiple FakeQuery instances
+    class SharedState:
+        def __init__(self):
+            self.call_count = 0
+            self.inserted = None
+            self.updated = None
+
+    shared = SharedState()
+
+    class FakeQueryWithError:
+        def select(self, *cols): return self
+        def eq(self, k, v): return self
+        def limit(self, n): return self
+        def maybe_single(self): return self
+
+        def execute(self):
+            shared.call_count += 1
+            if shared.call_count == 1:
+                # First call: select existing pending batch - return None (no existing)
+                return None
+            # Retry insert: return fake inserted row with ID
+            return FakeResponse([{"id": "new-batch-id"}])
+
+        def insert(self, row):
+            shared.inserted = row
+            shared.call_count += 1
+            # First insert attempt with charge_source fails
+            if shared.call_count == 2:
+                raise Exception("column charge_source does not exist")
+            return self
+
+        def update(self, data):
+            shared.updated = data
+            shared.call_count += 1
+            if shared.call_count == 2:
+                raise Exception("column charge_source does not exist")
+            return self
+
+    class FakeClientWithError:
+        def table(self, name):
+            return FakeQueryWithError()
+
+    from rempah_bridge.adapters.supabase_adapter import SupabaseDbAdapter
+    adapter = SupabaseDbAdapter(FakeClientWithError())
+    adapter._resolve_producer = lambda d: "p1"  # mock
+
+    success = adapter.upsert_pending_batch_from_device("d1", 2.5, "2026-08-13T10:00:00Z")
+
+    # Should succeed on retry without charge_source
+    assert success is True

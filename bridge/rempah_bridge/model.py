@@ -14,3 +14,4 @@ class Command:
     device_id: str
     action: str
     expected_state: Optional[str] = None
+    payload: Optional[dict] = None

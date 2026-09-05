@@ -5,6 +5,9 @@ from rempah_bridge.ports import DbPort, MqttPort
 
 import time
 from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Both action names are accepted so the dashboard's "EMERGENCY_STOP" and the
@@ -89,11 +92,63 @@ class Bridge:
     def _forward(self, command: Command) -> None:
         # Terjemahkan action kontrak ke bahasa firmware ("mulai"/"mati").
         action = _FIRMWARE_ACTIONS.get(command.action, command.action)
+        payload = {"command_id": command.id, "action": action}
+        if command.payload:
+            payload.update(command.payload)
         self.mqtt.publish(
             f"{self.topic_root}/{command.device_id}/command",
-            {"command_id": command.id, "action": action},
+            payload,
         )
         self.db.mark_command(command.id, "dispatched")
+
+    def handle_command(self, device_id: str, payload: dict) -> None:
+        """Handle device-initiated command from MQTT (e.g., ESP32 remote 'mulai' with berat_muatan)."""
+        action = payload.get("action")
+        if not action:
+            logger.warning("Command from %s missing action", device_id)
+            return
+
+        # Only handle 'mulai' (start) with berat_muatan for now
+        if action == "mulai":
+            berat_muatan = payload.get("berat_muatan")
+            if berat_muatan is not None:
+                try:
+                    charge_kg = float(berat_muatan)
+                    if charge_kg <= 0:
+                        logger.warning("Invalid berat_muatan %.2f from %s", charge_kg, device_id)
+                        self._send_command_error(device_id, "Massa muatan harus lebih dari 0 kg")
+                        return
+                except (ValueError, TypeError):
+                    logger.warning("Non-numeric berat_muatan from %s: %s", device_id, berat_muatan)
+                    self._send_command_error(device_id, "Massa muatan tidak valid (harus berupa angka)")
+                    return
+
+                ts = datetime.fromtimestamp(self.clock(), tz=timezone.utc).isoformat()
+                success = self.db.upsert_pending_batch_from_device(device_id, charge_kg, ts)
+                if success:
+                    logger.info("Upserted pending batch for %s with charge_mass_kg=%.2f from device", device_id, charge_kg)
+                else:
+                    logger.error("Failed to upsert pending batch for %s", device_id)
+                    self._send_command_error(device_id, "Gagal menyimpan batch. Coba lagi atau hubungi admin.")
+                    return
+
+        # Forward to firmware (in case other devices need to know)
+        # Note: we don't validate state for device-initiated commands
+        fw_action = _FIRMWARE_ACTIONS.get(action, action)
+        self.mqtt.publish(
+            f"{self.topic_root}/{device_id}/command",
+            {"action": fw_action, **{k: v for k, v in payload.items() if k != "action"}},
+        )
+
+    def _send_command_error(self, device_id: str, message: str) -> None:
+        """Send user-friendly error response to device via MQTT."""
+        try:
+            self.mqtt.publish(
+                f"{self.topic_root}/{device_id}/command/response",
+                {"success": False, "error": message, "timestamp": datetime.fromtimestamp(self.clock(), tz=timezone.utc).isoformat()},
+            )
+        except Exception as e:
+            logger.warning("Failed to send error response to %s: %s", device_id, e)
 
     def handle_telemetry(self, device_id: str, payload: dict) -> None:
         # Ticket 43: pesan dari device yang tidak terdaftar dicatat (bukan drop

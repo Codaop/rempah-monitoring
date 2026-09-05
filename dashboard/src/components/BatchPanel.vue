@@ -27,6 +27,11 @@ const batchId = computed(() => {
   return "#" + props.batch.id.slice(0, 4).toUpperCase();
 });
 
+// Check if current batch was synced from device (charge_source === "device")
+const isBatchFromDevice = computed(() => {
+  return props.batch?.charge_source === "device";
+});
+
 function fmtMass(kg) {
   if (!kg) return "—";
   const g = Number(kg) * 1000;
@@ -49,6 +54,7 @@ const finishAt = ref("");
 const busy = ref(false);
 const note = ref("");
 const session = ref(null);
+const pendingBatches = ref({}); // device_id -> { charge_mass_kg, charge_source }
 
 // Perangkat tersedia = online (< 60 dtk, konsisten OFFLINE_AFTER_S) DAN mode IDLE.
 const OFFLINE_MS = 60000;
@@ -70,13 +76,53 @@ function statusLabelOf(d) {
 const canStart = computed(() => props.devices.some(isAvailable));
 const canSubmit = computed(() => {
   const mass = Number(massKg.value);
-  return pickedId.value && Number.isFinite(mass) && mass > 0 && !busy.value;
+  // Allow submit if mass is from device (pre-filled and read-only) or manually entered valid mass
+  const hasValidMass =
+    isMassFromDevice.value || (Number.isFinite(mass) && mass > 0);
+  return pickedId.value && hasValidMass && !busy.value;
 });
 
-function openModal() {
+// Check if selected device has pending batch from device
+const selectedDevicePendingBatch = computed(() => {
+  return pendingBatches.value[pickedId.value];
+});
+
+const isMassFromDevice = computed(() => {
+  const pb = selectedDevicePendingBatch.value;
+  return pb?.charge_source === "device";
+});
+
+async function loadPendingBatches() {
+  try {
+    const { data, error } = await supabase
+      .from("batches")
+      .select("device_id, charge_mass_kg, charge_source")
+      .eq("status", "pending");
+    if (error) throw error;
+    const map = {};
+    for (const b of data || []) {
+      map[b.device_id] = {
+        charge_mass_kg: b.charge_mass_kg,
+        charge_source: b.charge_source,
+      };
+    }
+    pendingBatches.value = map;
+  } catch (e) {
+    console.warn("Failed to load pending batches:", e);
+  }
+}
+
+async function openModal() {
   if (!canStart.value || busy.value) return;
+  await loadPendingBatches();
   note.value = "";
   pickedId.value = props.devices.find(isAvailable)?.id || "";
+
+  // Pre-fill mass if device has pending batch from device
+  const pb = pendingBatches.value[pickedId.value];
+  if (pb?.charge_source === "device" && pb.charge_mass_kg) {
+    massKg.value = String(pb.charge_mass_kg);
+  }
   showForm.value = true;
 }
 
@@ -84,6 +130,9 @@ function closeForm() {
   if (busy.value) return;
   showForm.value = false;
   note.value = "";
+  massKg.value = "";
+  finishAt.value = "";
+  pickedId.value = "";
 }
 
 async function loadSession() {
@@ -103,7 +152,16 @@ async function startBatch() {
   if (busy.value) return;
   const d = props.devices.find((x) => x.id === pickedId.value);
   if (!d || !isAvailable(d)) return;
-  const mass = Number(massKg.value);
+
+  // If mass is from device, use that value (read-only)
+  let mass = Number(massKg.value);
+  if (
+    isMassFromDevice.value &&
+    selectedDevicePendingBatch.value?.charge_mass_kg
+  ) {
+    mass = Number(selectedDevicePendingBatch.value.charge_mass_kg);
+  }
+
   if (!Number.isFinite(mass) || mass <= 0) {
     note.value = "Massa muatan tidak valid.";
     return;
@@ -142,17 +200,49 @@ async function startBatch() {
       });
     }
 
-    const { error: bErr } = await supabase.from("batches").insert({
-      producer_id: d.producer_id,
-      session_id: sess.id,
-      device_id: d.id,
-      charge_mass_kg: mass,
-      estimated_finish_at: finishAt.value
-        ? new Date(finishAt.value).toISOString()
-        : null,
-      status: "pending",
-    });
-    if (bErr) throw bErr;
+    // If there's a pending batch from device, update it instead of creating new
+    let batchId;
+    const pb = selectedDevicePendingBatch.value;
+    if (pb?.charge_source === "device" && pb.charge_mass_kg) {
+      // Update existing pending batch from device
+      const { data: updatedBatch, error: uErr } = await supabase
+        .from("batches")
+        .update({
+          producer_id: d.producer_id,
+          session_id: sess.id,
+          charge_mass_kg: mass,
+          estimated_finish_at: finishAt.value
+            ? new Date(finishAt.value).toISOString()
+            : null,
+          status: "pending",
+          charge_source: "device",
+        })
+        .eq("device_id", d.id)
+        .eq("status", "pending")
+        .select("id")
+        .single();
+      if (uErr) throw uErr;
+      batchId = updatedBatch.id;
+    } else {
+      // Create new batch (dashboard-initiated)
+      const { data: newBatch, error: bErr } = await supabase
+        .from("batches")
+        .insert({
+          producer_id: d.producer_id,
+          session_id: sess.id,
+          device_id: d.id,
+          charge_mass_kg: mass,
+          estimated_finish_at: finishAt.value
+            ? new Date(finishAt.value).toISOString()
+            : null,
+          status: "pending",
+          charge_source: "dashboard",
+        })
+        .select("id")
+        .single();
+      if (bErr) throw bErr;
+      batchId = newBatch.id;
+    }
 
     const { error: cErr } = await supabase.from("commands").insert({
       producer_id: d.producer_id,
@@ -178,7 +268,63 @@ async function startBatch() {
     emit("created");
     closeForm();
   } catch (e) {
-    note.value = `Gagal: ${e.message}`;
+    // User-friendly error messages following UX laws:
+    // 1. Visibility of system status - clear what happened
+    // 2. Match between system and real world - user language, not technical
+    // 3. User control and freedom - clear way to recover
+    // 4. Consistency and standards - consistent error format
+    // 5. Error prevention - prevent errors where possible
+    // 6. Recognition rather than recall - don't make user remember error codes
+    // 7. Flexibility and efficiency - shortcuts for experts
+    // 8. Aesthetic and minimalist design - concise messages
+    // 9. Help users recognize, diagnose, recover - actionable guidance
+    // 10. Help and documentation - link to help if needed
+    let userMessage = "Gagal memulai batch.";
+    const errMsg = e.message || String(e);
+
+    if (
+      errMsg.includes("duplicate") ||
+      errMsg.includes("conflict") ||
+      errMsg.includes("unique")
+    ) {
+      userMessage =
+        "Batch sudah ada untuk perangkat ini. Silakan tunggu atau batalkan batch yang berjalan.";
+    } else if (
+      errMsg.includes("network") ||
+      errMsg.includes("fetch") ||
+      errMsg.includes("ECONNREFUSED")
+    ) {
+      userMessage =
+        "Tidak dapat terhubung ke server. Periksa koneksi internet dan coba lagi.";
+    } else if (
+      errMsg.includes("auth") ||
+      errMsg.includes("sesi") ||
+      errMsg.includes("JWT")
+    ) {
+      userMessage = "Sesi Anda telah berakhir. Silakan login ulang.";
+    } else if (
+      errMsg.includes("permission") ||
+      errMsg.includes("RLS") ||
+      errMsg.includes("policy")
+    ) {
+      userMessage =
+        "Anda tidak memiliki izin untuk memulai batch ini. Hubungi administrator.";
+    } else if (
+      errMsg.includes("invalid") ||
+      errMsg.includes("valid") ||
+      errMsg.includes("constraint")
+    ) {
+      userMessage =
+        "Data yang dimasukkan tidak valid. Periksa massa muatan dan coba lagi.";
+    } else if (errMsg.includes("timeout")) {
+      userMessage =
+        "Permintaan timeout. Server terlalu lama merespons. Coba lagi.";
+    } else {
+      // Fallback: show first 100 chars of error for debugging
+      userMessage = `Gagal memulai batch: ${errMsg.slice(0, 100)}`;
+    }
+
+    note.value = userMessage;
   } finally {
     busy.value = false;
   }
@@ -212,7 +358,12 @@ async function startBatch() {
         </div>
         <div class="info-box">
           <div class="info-label">MASSA MUATAN</div>
-          <div class="info-val">{{ fmtMass(batch.charge_mass_kg) }}</div>
+          <div class="info-val">
+            {{ fmtMass(batch.charge_mass_kg) }}
+            <span v-if="isBatchFromDevice" class="source-badge"
+              >dari perangkat</span
+            >
+          </div>
         </div>
       </div>
     </template>
@@ -287,7 +438,13 @@ async function startBatch() {
         min="0"
         step="0.1"
         placeholder="contoh: 5.5"
+        :disabled="isMassFromDevice"
+        :readonly="isMassFromDevice"
       />
+      <p v-if="isMassFromDevice" class="field-hint">
+        Massa muatan diset dari perangkat (ESP32 remote):
+        {{ fmtMass(selectedDevicePendingBatch?.charge_mass_kg) }}
+      </p>
     </div>
 
     <div class="form-row">
@@ -372,6 +529,21 @@ async function startBatch() {
   font-size: 15px;
   font-weight: 600;
   color: var(--navy);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.source-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .empty-hint {
@@ -469,6 +641,13 @@ async function startBatch() {
   font-weight: 600;
   color: var(--text);
   margin-bottom: 6px;
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-style: italic;
 }
 
 .note {

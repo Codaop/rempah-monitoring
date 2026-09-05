@@ -70,9 +70,10 @@ _bridge: Bridge | None = None
 
 def on_connect(client, userdata, flags, reason_code, props=None):
     if reason_code == 0:
-        logger.info("MQTT connected — subscribing to telemetry and state topics")
+        logger.info("MQTT connected — subscribing to telemetry, state, and command topics")
         client.subscribe(f"{TOPIC_ROOT}/+/telemetry", qos=1)
         client.subscribe(f"{TOPIC_ROOT}/+/state", qos=1)
+        client.subscribe(f"{TOPIC_ROOT}/+/command", qos=1)
     else:
         logger.error("MQTT connection refused: reason_code=%s", reason_code)
 
@@ -98,6 +99,9 @@ def on_message(client, userdata, msg):
         elif msg_type == "state":
             bridge.handle_state(payload)
             logger.info("state device=%s mode=%s cause=%s", device_id[:8], payload.get("mode"), payload.get("cause"))
+        elif msg_type == "command":
+            bridge.handle_command(device_id, payload)
+            logger.info("command device=%s action=%s payload=%s", device_id[:8], payload.get("action"), payload)
     except Exception:
         logger.exception("Error handling MQTT message on %s", msg.topic)
 

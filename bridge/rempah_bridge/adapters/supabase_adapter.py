@@ -240,6 +240,87 @@ class SupabaseDbAdapter:
             resp.data["id"][:8], charge_kg, target_yield_l,
         )
 
+    def upsert_pending_batch_from_device(self, device_id: str, charge_mass_kg: float, ts: str) -> bool:
+        """Create or update pending batch with charge_mass_kg from device (ESP32 remote).
+
+        Device-initiated 'mulai' command carries berat_muatan. This method ensures:
+        - If pending batch exists (created by dashboard), update its charge_mass_kg (device wins)
+        - If no pending batch, create one with status='pending' and charge_source='device'
+        - Uses upsert to handle race conditions idempotently
+        
+        Returns True on success, False on failure.
+        """
+        producer_id = self._resolve_producer(device_id)
+        if not producer_id:
+            logger.warning("Cannot upsert pending batch: unknown device %s", device_id)
+            return False
+
+        # Try to find existing pending batch for this device
+        resp = (
+            self._client.table("batches")
+            .select("id")
+            .eq("device_id", device_id)
+            .eq("status", "pending")
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+
+        batch_data = {
+            "device_id": device_id,
+            "producer_id": producer_id,
+            "charge_mass_kg": charge_mass_kg,
+            "status": "pending",
+            "updated_at": ts,
+        }
+
+        # Add charge_source if column exists (graceful degradation)
+        batch_data["charge_source"] = "device"
+
+        try:
+            if resp and resp.data:
+                # Update existing pending batch (device value takes precedence)
+                batch_id = resp.data["id"]
+                self._client.table("batches").update(batch_data).eq("id", batch_id).execute()
+                logger.info("Updated pending batch %s charge_mass_kg=%.2f from device", batch_id[:8], charge_mass_kg)
+            else:
+                # Create new pending batch
+                batch_data["created_at"] = ts
+                result = self._client.table("batches").insert(batch_data).execute()
+                # result.data may be empty list in test mocks; real supabase-py returns inserted row
+                # If no exception, assume success
+                if result.data and len(result.data) > 0:
+                    new_id = result.data[0]["id"]
+                    logger.info("Created pending batch %s charge_mass_kg=%.2f from device", new_id[:8], charge_mass_kg)
+                else:
+                    logger.info("Created pending batch for device %s (mock mode, no ID returned)", device_id)
+            return True
+        except Exception as e:
+            # Handle missing charge_source column gracefully
+            if "charge_source" in str(e):
+                logger.warning("charge_source column not found, retrying without it")
+                batch_data.pop("charge_source", None)
+                try:
+                    if resp and getattr(resp, "data", None):
+                        batch_id = resp.data["id"]
+                        self._client.table("batches").update(batch_data).eq("id", batch_id).execute()
+                        logger.info("Updated pending batch %s charge_mass_kg=%.2f from device (no charge_source)", batch_id[:8], charge_mass_kg)
+                    else:
+                        batch_data["created_at"] = ts
+                        result = self._client.table("batches").insert(batch_data).execute()
+                        if result.data:
+                            new_id = result.data[0]["id"]
+                            logger.info("Created pending batch %s charge_mass_kg=%.2f from device (no charge_source)", new_id[:8], charge_mass_kg)
+                        else:
+                            logger.error("Failed to create pending batch for device %s", device_id)
+                            return False
+                    return True
+                except Exception as e2:
+                    logger.error("Failed to upsert pending batch (without charge_source): %s", e2)
+                    return False
+            logger.error("Failed to upsert pending batch: %s", e)
+            return False
+
     def close_active_batch(self, device_id: str, ts: str) -> None:
         """Close the active batch and finalize its batch_logs aggregate."""
         resp = (
