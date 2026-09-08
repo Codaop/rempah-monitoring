@@ -472,14 +472,8 @@ function openReport(print) {
   const r = report.value;
   if (!r) return;
   const html = buildReportHtml(r, print);
-  // Prefer popup (perilaku lama); jika diblokir popup blocker → fallback
-  // pratinjau in-app lewat iframe di modal agar tombol selalu berfungsi.
-  const w = window.open("", "_blank", "width=820,height=900");
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-    return;
-  }
+  // Selalu tampilkan modal in-app untuk pratinjau PDF
+  // Tidak pernah menggunakan popup window
   reportHtml.value = html;
   showReportModal.value = true;
 }
