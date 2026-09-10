@@ -17,7 +17,9 @@ export const mqttError = ref("");
 
 // Live store per device_id:
 // {
-//   device_id, received_at (Date.now browser), mode (dari state),
+//   device_id, received_at (Date.now browser, pesan APAPUN termasuk state),
+//   telemetry_at (Date.now browser, HANYA telemetry),
+//   mode (dari state),
 //   total_drips (nilai drip_count terbaru dari broker — sudah kumulatif),
 //   telemetry: { boiler_temp_c, cooling_temp_c, gas_mass_kg, water_level, drip_count, flame_lit },
 //   sparks: { boiler_temp_c: [], cooling_temp_c: [], gas_mass_kg: [], drip_count: [] }  // ring buffer
@@ -41,6 +43,7 @@ function ensureEntry(deviceId) {
     liveByDevice[deviceId] = {
       device_id: deviceId,
       received_at: 0,
+      telemetry_at: 0,
       mode: null,
       cause: null,
       total_drips: 0,
@@ -78,7 +81,11 @@ function applyTelemetry(entry, msg) {
       pushSpark(entry.sparks.drip_count, n);
     }
   }
-  entry.received_at = Date.now();
+  // Hanya telemetry yang membuktikan perangkat hidup: pesan `state` dikirim
+  // retained (dikirim ulang broker saat browser baru subscribe), jadi stamp
+  // dari `state` akan menandai perangkat mati sebagai online.
+  entry.telemetry_at = Date.now();
+  entry.received_at = entry.telemetry_at;
 }
 
 function applyState(entry, msg) {

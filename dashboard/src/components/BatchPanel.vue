@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
-import { fmtDateTime, fmtNum, offlineSince } from "../lib/format";
+import { fmtDateTime, fmtNum } from "../lib/format";
+import { deviceOnline } from "../lib/deviceStatus";
 import { supabase } from "../lib/supabase";
 import AppModal from "./AppModal.vue";
 
@@ -56,21 +57,17 @@ const note = ref("");
 const session = ref(null);
 const pendingBatches = ref({}); // device_id -> { charge_mass_kg, charge_source }
 
-// Perangkat tersedia = online (< 60 dtk, konsisten OFFLINE_AFTER_S) DAN mode IDLE.
-const OFFLINE_MS = 60000;
-
+// Perangkat tersedia = online (telemetry MQTT segar ATAU last_seen_at bridge
+// segar) DAN mode IDLE.
 function isAvailable(d) {
   if (!d || !d.mode || d.mode !== "IDLE") return false;
-  const ms = offlineSince(d.last_seen_at);
-  return ms >= 0 && ms < OFFLINE_MS;
+  return deviceOnline(d);
 }
 
 function statusLabelOf(d) {
   if (!d) return "—";
   if (d.mode && d.mode !== "IDLE") return d.mode;
-  const ms = offlineSince(d.last_seen_at);
-  if (ms < 0 || ms >= OFFLINE_MS) return "Offline";
-  return "Tersedia";
+  return deviceOnline(d) ? "Tersedia" : "Offline";
 }
 
 const canStart = computed(() => props.devices.some(isAvailable));

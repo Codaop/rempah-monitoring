@@ -1,14 +1,14 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { supabase } from "../lib/supabase";
-import { fmtDateTime, offlineSince } from "../lib/format";
+import { fmtDateTime } from "../lib/format";
+import { deviceOnline, telemetryFresh } from "../lib/deviceStatus";
 import AppModal from "./AppModal.vue";
 
 // Root topic MQTT — ditetapkan "rempah" (keputusan tim, ticket 39); bukan
 // env configurable lagi. Semua komponen (bridge, fake_esp32, probe) memakai
 // root yang sama.
 const TOPIC_ROOT = "rempah";
-const OFFLINE_MS = 60000;
 const STALE_DAYS = 7; // device terdaftar lama tanpa koneksi pertama (ticket 42)
 
 // Kredensial MQTT bersama (shared credential) — satu username/password untuk
@@ -51,13 +51,12 @@ function mqttTopics(deviceId) {
 }
 
 // Status lifecycle jujur (ticket 40): belum pernah ada telemetry →
-// "Menunggu koneksi pertama"; last_seen_at segar → Online; kedaluwarsa →
-// Offline. Tidak ada lagi state "belum ter-provision" yang menyesatkan.
+// "Menunggu koneksi pertama"; online bila telemetry MQTT segar atau
+// last_seen_at bridge segar; selain itu Offline.
 function deviceStatus(d) {
-  if (!d.last_seen_at)
+  if (!d.last_seen_at && !telemetryFresh(d.id))
     return { label: "Menunggu koneksi pertama", cls: "wait" };
-  const ms = offlineSince(d.last_seen_at);
-  if (ms >= 0 && ms < OFFLINE_MS) return { label: "Online", cls: "ok" };
+  if (deviceOnline(d)) return { label: "Online", cls: "ok" };
   return { label: "Offline", cls: "off" };
 }
 

@@ -25,13 +25,13 @@ import {
   seedDrips,
   publishCommand,
 } from "../lib/mqtt";
-import { fmtNum, fmtTime, fmtDateTime, offlineSince } from "../lib/format";
+import { fmtNum, fmtTime, fmtDateTime } from "../lib/format";
+import { OFFLINE_MS, deviceOnline, telemetryFresh } from "../lib/deviceStatus";
 
-// Auto-refresh ringan tiap 10 detik — HANYA menyegarkan data metric cards
-// (riwayat telemetry + seed tetesan). Perubahan device/batch dilayani
-// subscription Realtime; reload penuh hanya saat mount/refresh manual.
-const REFRESH_MS = 10000;
-const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
+// Ambang "jalur MQTT basi": >10 dtk tanpa pesan dari broker → indikator
+// reconnecting. Tidak ada auto-refresh data; perubahan device/batch dilayani
+// subscription Realtime, penyegaran penuh hanya manual (tombol Refresh).
+const MQTT_STALE_MS = 10000;
 const route = useRoute();
 const batchPanel = ref(null);
 
@@ -41,7 +41,7 @@ const batchLog = ref(null);
 const history = ref([]); // semua telemetry (multi-device)
 const alerts = ref([]);
 const refreshPrompt = ref("");
-const lastMessageAt = ref(null); // terakhir kali terima pesan MQTT dari broker
+const lastMessageAt = ref(null); // terakhir kali terima pesan dari broker MQTT (bukan DB)
 
 // ── Resume batch terputus (ticket 60) ───────────────────────────────────────
 // Saat device kembali online & ada batch interrupted, modal konfirmasi muncul:
@@ -51,7 +51,6 @@ const handledInterruptIds = ref(new Set()); // nasib sudah diputuskan (dismiss/r
 const resumeBusy = ref(false);
 const resumeError = ref("");
 const loading = ref(true);
-const lastSyncAt = ref(null); // terakhir kali auto-refresh penuh selesai
 const selectedIdx = ref(0);
 const commandFeedback = ref("");
 const commandStatusCache = new Map(); // command_id → status terakhir (dedupe)
@@ -73,10 +72,7 @@ const dripDeviceId = computed(
 const dripLiveEntry = computed(() =>
   dripDeviceId.value ? liveByDevice[dripDeviceId.value] : null
 );
-const dripFresh = computed(() => {
-  const e = dripLiveEntry.value;
-  return !!(e && e.received_at && Date.now() - e.received_at < OFFLINE_MS);
-});
+const dripFresh = computed(() => telemetryFresh(dripDeviceId.value));
 const dripValue = computed(() => {
   if (
     mqttStatus.value === "connected" &&
@@ -110,7 +106,7 @@ const latest = computed(() => {
     return {
       ...(e.telemetry || {}),
       mode: e.mode,
-      ts: e.received_at ? new Date(e.received_at).toISOString() : null,
+      ts: e.telemetry_at ? new Date(e.telemetry_at).toISOString() : null,
     };
   }
   // Data basi / MQTT terputus → kembalikan 0 untuk semua metric numerik
@@ -135,10 +131,7 @@ const SPARK_POINTS = 60;
 const liveEntry = computed(() =>
   activeDeviceId.value ? liveByDevice[activeDeviceId.value] : null
 );
-const liveFresh = computed(() => {
-  const e = liveEntry.value;
-  return !!(e && e.received_at && Date.now() - e.received_at < OFFLINE_MS);
-});
+const liveFresh = computed(() => telemetryFresh(activeDeviceId.value));
 const useLive = computed(
   () => mqttStatus.value === "connected" && liveFresh.value
 );
@@ -163,13 +156,9 @@ const greeting = computed(() => {
   return "Selamat Malam";
 });
 
-// Status online/offline jujur dari devices.last_seen_at (bukan lastSync).
-const sensorOnline = computed(() => {
-  const d = selectedDevice.value;
-  if (!d) return false;
-  const ms = offlineSince(d.last_seen_at);
-  return ms >= 0 && ms < OFFLINE_MS;
-});
+// Status online/offline perangkat terpilih: telemetry MQTT segar ATAU
+// last_seen_at dari bridge masih segar (lihat lib/deviceStatus.js).
+const sensorOnline = computed(() => deviceOnline(selectedDevice.value));
 
 // "Terhubung" benar-benar berarti data mengalir: telemetry terakhir perangkat
 // terpilih masih segar (< OFFLINE_MS).
@@ -184,9 +173,12 @@ const dataFlowing = computed(() => {
 const isReconnecting = computed(() => {
   if (!lastMessageAt.value) return false;
   const age = Date.now() - new Date(lastMessageAt.value).getTime();
-  const staleData = age > REFRESH_MS; // 10 detik
+  const staleData = age > MQTT_STALE_MS; // 10 detik
   // Reconnecting jika: >10s tidak ada data + status MQTT bukan connected (atau connecting)
-  return staleData && (mqttStatus.value !== "connected" || mqttStatus.value === "connecting");
+  return (
+    staleData &&
+    (mqttStatus.value !== "connected" || mqttStatus.value === "connecting")
+  );
 });
 
 const mqttLabel = computed(() => {
@@ -205,8 +197,8 @@ const mqttDotClass = computed(() => {
   return "dot-off";
 });
 
-const hasOnlineDevice = computed(() => 
-  devices.value.some(d => sensorOnline.value)
+const hasOnlineDevice = computed(() =>
+  devices.value.some((d) => deviceOnline(d))
 );
 
 const statusSubtitle = computed(() => {
@@ -351,12 +343,11 @@ async function loadAll() {
   history.value = (histRes.data || []).reverse();
   loading.value = false;
 
-  // TAMBAHAN: deteksi device mati (>1 menit tidak menerima data)
-  const deadDevices = devices.value.filter((d) => {
-    if (!d.last_seen_at) return false;
-    const ms = offlineSince(d.last_seen_at);
-    return ms >= OFFLINE_MS;
-  });
+  // TAMBAHAN: deteksi device mati (>1 menit tidak menerima data). Device yang
+  // belum pernah terhubung dikecualikan (bukan "mati", hanya belum online).
+  const deadDevices = devices.value.filter(
+    (d) => d.last_seen_at && !deviceOnline(d)
+  );
   if (deadDevices.length > 0 && alerts.value.length === 0) {
     pushAlert(
       "warn",
@@ -381,43 +372,12 @@ async function loadAll() {
   }
 }
 
-// Auto-refresh ringan (REFRESH_MS): HANYA menyegarkan data yang dipakai
-// metric cards — riwayat telemetry (sparkline) & nilai tetesan batch aktif.
-// Tidak me-reset devices/batch/state sehingga pilihan operator di panel
-// tidak terganggu; transisi batch/device dilayani subscription Realtime.
-async function refreshCards() {
-  try {
-    const batchId = batch.value?.id || null;
-    const [histRes, seedRes] = await Promise.all([
-      supabase
-        .from("sensor_logs")
-        .select("*")
-        .order("ts", { ascending: false })
-        .limit(240),
-      batchId
-        ? supabase
-            .from("sensor_logs")
-            .select("drip_count")
-            .eq("batch_id", batchId)
-            .order("ts", { ascending: false })
-            .limit(1)
-        : Promise.resolve({ data: null }),
-    ]);
-    if (histRes.data) history.value = histRes.data.reverse();
-    if (seedRes.data && batchId) {
-      // Nilai terakhir sudah kumulatif — ganti, bukan tambah.
-      const latest = Number(seedRes.data?.[0]?.drip_count) || 0;
-      seedDrips(batch.value.device_id, latest);
-    }
-    lastMessageAt.value = new Date().toISOString();
-    lastSyncAt.value = new Date().toISOString();
-  } catch (err) {
-    console.warn("[REMPAH] Refresh card gagal:", err);
-  }
-}
+// Auto-refresh data dihapus (permintaan operator): riwayat telemetry & nilai
+// tetesan batch hanya dimuat saat mount dan saat tombol Refresh ditekan.
+// Perubahan device/batch tetap dilayani subscription Realtime, dan nilai live
+// tetap datang dari broker MQTT.
 
 let realtime = null;
-let pollTimer = null;
 
 onMounted(async () => {
   await loadAll();
@@ -443,8 +403,6 @@ onMounted(async () => {
             checkThresholds(row);
           }
         }
-        // TAMBAHAN: track terakhir kali terima pesan dari broker MQTT
-        lastMessageAt.value = new Date().toISOString();
       }
     )
     .on(
@@ -579,12 +537,9 @@ onMounted(async () => {
       }
     )
     .subscribe();
-
-  pollTimer = setInterval(refreshCards, REFRESH_MS);
 });
 
 onBeforeUnmount(() => {
-  clearInterval(pollTimer);
   realtime && supabase.removeChannel(realtime);
   disconnectMqtt();
 });
@@ -598,11 +553,17 @@ watch(devices, (list) => {
 });
 
 // Mode device ikut ter-update dari pesan state MQTT yang retained (ticket 02).
+// Sekaligus menjadi satu-satunya tempat lastMessageAt disetel — diambil dari
+// stempel `telemetry_at`, bukan dari polling Supabase, agar indikator
+// "MQTT Menghubungkan…" benar-benar mencerminkan jalur broker.
 watch(liveByDevice, (store) => {
+  let terbaru = 0;
   for (const dev of devices.value) {
     const e = store[dev.id];
     if (e && e.mode && dev.mode !== e.mode) dev.mode = e.mode;
+    if (e?.telemetry_at && e.telemetry_at > terbaru) terbaru = e.telemetry_at;
   }
+  if (terbaru) lastMessageAt.value = new Date(terbaru).toISOString();
 });
 
 function onCommand({ device, action, mismatch }) {
@@ -648,15 +609,8 @@ const resumeDeviceOnline = computed(() => {
   const b = interruptedBatch.value;
   if (!b) return false;
   const d = devices.value.find((x) => x.id === b.device_id);
-  if (!d) return false;
-  // Gunakan lastMessageAt jika ada (tracking broker MQTT), else fallback ke last_seen_at
-  let ms;
-  if (lastMessageAt.value) {
-    ms = Date.now() - new Date(lastMessageAt.value).getTime();
-  } else {
-    ms = offlineSince(d.last_seen_at);
-  }
-  return ms >= 0 && ms < OFFLINE_MS;
+  // deviceOnline: telemetry MQTT segar ATAU last_seen_at bridge segar.
+  return deviceOnline(d);
 });
 
 const showResumeModal = computed(() => {
@@ -771,7 +725,6 @@ function startNewBatchInstead() {
           <span class="dot-status" :class="mqttDotClass"></span>
           {{ mqttLabel }}
         </span>
-        
       </div>
     </div>
 

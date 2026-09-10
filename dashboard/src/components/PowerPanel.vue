@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { supabase } from "../lib/supabase";
-import { offlineSince } from "../lib/format";
+import { deviceOnline } from "../lib/deviceStatus";
 import AppModal from "./AppModal.vue";
 
 const props = defineProps({
@@ -22,7 +22,6 @@ const selectedIdx = computed({
   set: (v) => emit("update:selectedIndex", v),
 });
 
-const OFFLINE_MS = 60000; // konsisten dengan OFFLINE_AFTER_S bridge (ticket 31)
 const showPicker = ref(false);
 const busy = ref(false);
 const note = ref("");
@@ -47,12 +46,8 @@ const isPoweredOn = computed(() => {
   return mode && mode !== "IDLE" && mode !== "ESTOP";
 });
 
-const isDeviceOnline = computed(() => {
-  const d = selectedDevice.value;
-  if (!d) return false;
-  const ms = offlineSince(d.last_seen_at);
-  return ms >= 0 && ms < OFFLINE_MS;
-});
+// Online = telemetry MQTT segar ATAU last_seen_at bridge segar.
+const isDeviceOnline = computed(() => deviceOnline(selectedDevice.value));
 
 const maxTravel = computed(() => Math.max(0, trackW.value - CIRCLE - PAD * 2));
 
@@ -228,10 +223,7 @@ function selectDevice(idx) {
         :class="{ active: i === selectedIdx }"
         @click="selectDevice(i)"
       >
-        <span
-          class="picker-dot"
-          :class="offlineSince(d.last_seen_at) < OFFLINE_MS ? 'on' : 'off'"
-        ></span>
+        <span class="picker-dot" :class="deviceOnline(d) ? 'on' : 'off'"></span>
         {{ d.name }} <small class="muted">{{ d.mode || "IDLE" }}</small>
       </div>
     </div>

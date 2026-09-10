@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
-import { offlineSince } from "../lib/format";
+import { deviceOnline } from "../lib/deviceStatus";
 
 const router = useRouter();
 
@@ -29,8 +29,7 @@ let timer = null;
 const anyDeviceAvailable = computed(() =>
   devices.value.some((d) => {
     if (!d.mode || d.mode !== "IDLE") return false;
-    const ms = offlineSince(d.last_seen_at);
-    return ms >= 0 && ms < 60000; // konsisten OFFLINE_AFTER_S bridge
+    return deviceOnline(d);
   })
 );
 

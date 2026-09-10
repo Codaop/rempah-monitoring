@@ -3,7 +3,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import AppShell from "../components/AppShell.vue";
 import AppModal from "../components/AppModal.vue";
 import { supabase } from "../lib/supabase";
-import { fmtNum, fmtDateTime, fmtTime, offlineSince } from "../lib/format";
+import { fmtNum, fmtDateTime, fmtTime } from "../lib/format";
+import { OFFLINE_MS, deviceOnline } from "../lib/deviceStatus";
 
 const search = ref("");
 const filter = ref("semua");
@@ -165,15 +166,10 @@ async function loadSnapshot() {
   };
 }
 
-// Status online/offline jujur dari last_seen_at per perangkat (threshold 60s,
-// konsisten dengan OFFLINE_AFTER_S bridge dan dashboard).
-const OFFLINE_MS = 60000;
+// Status online/offline jujur per perangkat: telemetry MQTT segar ATAU
+// last_seen_at bridge segar (threshold 60s, lihat lib/deviceStatus.js).
 const anyDeviceOnline = computed(() =>
-  (snapshot.value?.devices || []).some(
-    (d) =>
-      offlineSince(d.last_seen_at) >= 0 &&
-      offlineSince(d.last_seen_at) < OFFLINE_MS
-  )
+  (snapshot.value?.devices || []).some((d) => deviceOnline(d))
 );
 const latestSensorAge = computed(() => {
   const ts = snapshot.value?.latest?.ts;
