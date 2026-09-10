@@ -23,8 +23,7 @@ const navGroups = [
 // ── Status batch aktif + perangkat tersedia (untuk tombol sidebar) ─────────
 const hasActiveBatch = ref(false);
 const devices = ref([]);
-const POLL_MS = 30000;
-let timer = null;
+let channel = null;
 
 const anyDeviceAvailable = computed(() =>
   devices.value.some((d) => {
@@ -51,11 +50,34 @@ function startNewBatch() {
   router.push({ name: "dashboard", query: { start: Date.now() } });
 }
 
+// Status sidebar diperbarui lewat Realtime (event-driven), bukan polling
+// berkala — tidak ada auto-refresh periodik di halaman dashboard.
 onMounted(async () => {
   await refreshBatchStatus();
-  timer = setInterval(refreshBatchStatus, POLL_MS);
+  channel = supabase
+    .channel("shell-status")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "batches" },
+      refreshBatchStatus
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "devices" },
+      refreshBatchStatus
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "device_state" },
+      refreshBatchStatus
+    )
+    .subscribe();
 });
-onBeforeUnmount(() => clearInterval(timer));
+
+onBeforeUnmount(() => {
+  if (channel) supabase.removeChannel(channel);
+  channel = null;
+});
 </script>
 
 <template>

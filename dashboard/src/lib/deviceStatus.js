@@ -14,23 +14,52 @@
 // `received_at` yang terpolusi retained `state`, satu memakai `lastMessageAt`
 // yang di-set auto-refresh tiap 10 detik) sehingga badge status bertentangan
 // dengan metric card. Helper ini menjadi satu-satunya sumber kebenaran.
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { liveByDevice } from "./mqtt";
+import { offlineSince } from "./format";
 
 // Konsisten dengan OFFLINE_AFTER_S di bridge (ticket 31).
 export const OFFLINE_MS = 60000;
 
-// ── Jam reaktif ─────────────────────────────────────────────────────────────
-// Kesegaran adalah fungsi waktu, jadi computed yang bergantung padanya (mis.
-// badge online) harus re-evaluasi saat waktu berjalan walau tak ada pesan baru
-// — kalau tidak, badge "Online" akan tersangkut setelah telemetry berhenti.
-// Detak berjalan selama modul hidup (aplikasi ini SPA) sehingga semua halaman
-// membaca "sekarang" yang sama dan selalu segar.
+// ── Kesegaran tanpa auto-refresh ────────────────────────────────────────────
+// Kesegaran adalah fungsi waktu, tapi kita TIDAK memakai timer periodik (jam
+// yang tick tiap beberapa detik akan membuat halaman terus re-render dan
+// terlihat seperti auto-refresh). Sebagai gantinya, satu `setTimeout` sekali
+// dijadwalkan tepat saat telemetry segar berikutnya kedaluwarsa, dan
+// dijadwalkan ulang hanya ketika telemetry baru tiba (event-driven).
+// Tidak ada telemetry segar → tidak ada timer sama sekali.
 export const statusNow = ref(Date.now());
+let expiryTimer = null;
 
-setInterval(() => {
-  statusNow.value = Date.now();
-}, 5000);
+function jadwalkanKedaluwarsa() {
+  if (expiryTimer) {
+    clearTimeout(expiryTimer);
+    expiryTimer = null;
+  }
+
+  const now = Date.now();
+  let tercepat = Infinity;
+  for (const id in liveByDevice) {
+    const at = liveByDevice[id]?.telemetry_at;
+    if (!at) continue;
+    const deadline = at + OFFLINE_MS;
+    if (deadline > now && deadline < tercepat) tercepat = deadline;
+  }
+
+  if (!Number.isFinite(tercepat)) return;
+
+  expiryTimer = setTimeout(
+    () => {
+      expiryTimer = null;
+      statusNow.value = Date.now();
+      jadwalkanKedaluwarsa();
+    },
+    tercepat - now + 1000
+  );
+}
+
+// Telemetry baru masuk → jadwalkan ulang ambang kedaluwarsanya.
+watch(liveByDevice, jadwalkanKedaluwarsa, { deep: true });
 
 // Umur (ms) telemetry live terakhir untuk sebuah device, atau -1 bila belum
 // pernah menerima telemetry di sesi browser ini.
@@ -48,11 +77,12 @@ export function telemetryFresh(deviceId, now = statusNow.value) {
 }
 
 // Perangkat online = telemetry MQTT segar ATAU bridge menulis `last_seen_at`
-// yang masih segar. Salah satu jalur saja sudah cukup.
-export function deviceOnline(device, now = statusNow.value) {
+// yang masih segar. Salah satu jalur saja sudah cukup. Jalur `last_seen_at`
+// memakai jam nyata (bukan statusNow) dan bereaksi lewat pembaruan data,
+// bukan lewat timer.
+export function deviceOnline(device) {
   if (!device) return false;
-  if (telemetryFresh(device.id, now)) return true;
-  if (!device.last_seen_at) return false;
-  const ms = now - new Date(device.last_seen_at).getTime();
+  if (telemetryFresh(device.id)) return true;
+  const ms = offlineSince(device.last_seen_at);
   return ms >= 0 && ms < OFFLINE_MS;
 }
