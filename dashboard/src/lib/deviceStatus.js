@@ -22,13 +22,18 @@ import { offlineSince } from "./format";
 export const OFFLINE_MS = 60000;
 
 // ── Kesegaran tanpa auto-refresh ────────────────────────────────────────────
-// Kesegaran adalah fungsi waktu, tapi kita TIDAK memakai timer periodik (jam
-// yang tick tiap beberapa detik akan membuat halaman terus re-render dan
-// terlihat seperti auto-refresh). Sebagai gantinya, satu `setTimeout` sekali
-// dijadwalkan tepat saat telemetry segar berikutnya kedaluwarsa, dan
-// dijadwalkan ulang hanya ketika telemetry baru tiba (event-driven).
-// Tidak ada telemetry segar → tidak ada timer sama sekali.
-export const statusNow = ref(Date.now());
+// Umur telemetry SELALU dihitung dari jam nyata (Date.now()), bukan dari nilai
+// yang disimpan di sebuah ref: ref seperti itu beku di antara pembaruan, dan
+// setiap `telemetry_at` yang lebih baru akan menghasilkan umur negatif sehingga
+// perangkat segar terbaca basi (card menampilkan 0 walau broker aktif).
+//
+// Yang tetap perlu reaktif hanyalah TRANSISI segar → basi. Itu ditangani satu
+// `setTimeout` sekali jalan yang dijadwalkan tepat pada ambang kedaluwarsa
+// terdekat, dan dijadwalkan ulang hanya ketika telemetry baru tiba. Saat
+// menyala, `staleTick` dinaikkan sehingga setiap computed yang membaca
+// kesegaran dihitung ulang. Tidak ada telemetry segar → tidak ada timer sama
+// sekali, sehingga halaman tidak pernah ter-refresh berkala.
+export const staleTick = ref(0);
 let expiryTimer = null;
 
 function jadwalkanKedaluwarsa() {
@@ -51,7 +56,7 @@ function jadwalkanKedaluwarsa() {
   expiryTimer = setTimeout(
     () => {
       expiryTimer = null;
-      statusNow.value = Date.now();
+      staleTick.value += 1;
       jadwalkanKedaluwarsa();
     },
     tercepat - now + 1000
@@ -63,23 +68,25 @@ watch(liveByDevice, jadwalkanKedaluwarsa, { deep: true });
 
 // Umur (ms) telemetry live terakhir untuk sebuah device, atau -1 bila belum
 // pernah menerima telemetry di sesi browser ini.
-export function telemetryAge(deviceId, now = statusNow.value) {
+export function telemetryAge(deviceId, now = Date.now()) {
   const at = liveByDevice[deviceId]?.telemetry_at;
   if (!at) return -1;
   return now - at;
 }
 
 // Perangkat punya telemetry live yang masih segar dari broker MQTT.
-export function telemetryFresh(deviceId, now = statusNow.value) {
+export function telemetryFresh(deviceId, now = Date.now()) {
+  // Baca staleTick agar computed yang memakai helper ini ikut dihitung ulang
+  // tepat pada transisi segar → basi (satu-satunya pembaruan reaktif umur).
+  void staleTick.value;
   if (!deviceId) return false;
   const age = telemetryAge(deviceId, now);
   return age >= 0 && age < OFFLINE_MS;
 }
 
 // Perangkat online = telemetry MQTT segar ATAU bridge menulis `last_seen_at`
-// yang masih segar. Salah satu jalur saja sudah cukup. Jalur `last_seen_at`
-// memakai jam nyata (bukan statusNow) dan bereaksi lewat pembaruan data,
-// bukan lewat timer.
+// yang masih segar. Salah satu jalur saja sudah cukup. Keduanya memakai jam
+// nyata dan bereaksi lewat pembaruan data, bukan lewat timer berkala.
 export function deviceOnline(device) {
   if (!device) return false;
   if (telemetryFresh(device.id)) return true;
